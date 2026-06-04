@@ -39,13 +39,21 @@ jobs:
         run: npx playwright install-deps chromium
 
       # Electron 42 ships no postinstall, so its binary downloads lazily on first
-      # launch and races under Playwright. Fetch it deterministically up front and
-      # fail loudly if path.txt didn't materialise, rather than at launch time.
+      # launch and races under Playwright. Fetch it deterministically up front.
+      # The installer downloads + extracts (dist/electron, electron.d.ts) but in CI
+      # intermittently skips its final write of path.txt — the pointer file Playwright
+      # reads to find the binary. So if the binary extracted but path.txt is absent,
+      # write it ourselves (linux binary is dist/electron); fail loudly if the binary
+      # genuinely didn't extract.
       - name: Install Electron binary
         run: |
           node node_modules/electron/install.js
-          test -f node_modules/electron/path.txt \
-            || { echo "::error::electron path.txt missing after install"; ls -la node_modules/electron; exit 1; }
+          if [ ! -f node_modules/electron/path.txt ]; then
+            test -x node_modules/electron/dist/electron \
+              || { echo "::error::electron binary missing after install"; ls -la node_modules/electron/dist; exit 1; }
+            printf electron > node_modules/electron/path.txt
+            echo "wrote missing path.txt -> electron"
+          fi
 
       # Real Electron needs a display — give xvfb an actual screen, not the bare
       # default, so the renderer window can initialise.
