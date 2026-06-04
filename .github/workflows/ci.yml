@@ -47,13 +47,9 @@ jobs:
       # genuinely didn't extract.
       - name: Install Electron binary
         run: |
-          node node_modules/electron/install.js
-          if [ ! -f node_modules/electron/path.txt ]; then
-            test -x node_modules/electron/dist/electron \
-              || { echo "::error::electron binary missing after install"; ls -la node_modules/electron/dist; exit 1; }
-            printf electron > node_modules/electron/path.txt
-            echo "wrote missing path.txt -> electron"
-          fi
+          DEBUG='@electron/get:*' node node_modules/electron/install.js
+          echo "--- dist after install ---"; ls -la node_modules/electron/dist || true
+          echo "--- path.txt ---"; cat node_modules/electron/path.txt || echo "(missing)"
 
       # Real Electron needs a display — give xvfb an actual screen, not the bare
       # default, so the renderer window can initialise.
