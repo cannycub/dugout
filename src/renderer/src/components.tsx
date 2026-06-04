@@ -1,8 +1,7 @@
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import type { Story, Spec } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
-import type { DugoutEvent } from "../../shared/dugout-api.js";
 import { SPEC_META, RIBBON_STAGES, stageIndex } from "./lifecycle.js";
 
 /* ── Status ribbon: the lifecycle base path ─────────────────────────────────────────────── */
@@ -210,46 +209,6 @@ function SpecCard({ spec, index, editable, reviewSelected, replayLocked, onToggl
       </div>
     </motion.div>
   );
-}
-
-/* ── Telemetry log ──────────────────────────────────────────────────────────────────────── */
-
-export function TelemetryLog({ events }: { events: DugoutEvent[] }) {
-  return (
-    <div className="panel telemetry">
-      <div className="panel-eyebrow">
-        Telemetry <span className="arrow">→</span> Datadog <span className="fake-tag">(fake)</span>
-      </div>
-      <div className="telemetry-list">
-        <AnimatePresence initial={false}>
-          {events.length === 0 && <p className="muted small">Awaiting signal…</p>}
-          {events.map((e, i) => (
-            <motion.div
-              className={`tele-item ${e.kind}`}
-              key={`${e.at}-${i}`}
-              initial={{ opacity: 0, x: 12 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              <span className="tele-time">{new Date(e.at).toLocaleTimeString()}</span>
-              <span className={`tele-dot ${e.kind}`} />
-              <span className="tele-name">{e.name}</span>
-              <span className="tele-tags">{formatTags(e)}</span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-}
-
-function formatTags(e: DugoutEvent): string {
-  if (e.kind === "metric") {
-    return Object.entries(e.tags)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(" ");
-  }
-  return e.status;
 }
 
 /* ── PR banner ──────────────────────────────────────────────────────────────────────────── */

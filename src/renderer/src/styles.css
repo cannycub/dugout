@@ -226,7 +226,7 @@ body {
 /* ── Stage grid ─────────────────────────────────────────────────────────────────────────── */
 .stage {
   display: grid;
-  grid-template-columns: 320px 1fr 340px;
+  grid-template-columns: 340px 1fr;
   gap: 18px;
   min-height: 0;
 }
@@ -559,70 +559,6 @@ body {
 }
 .review-toggle input {
   accent-color: var(--clay);
-}
-
-/* ── Telemetry ──────────────────────────────────────────────────────────────────────────── */
-.telemetry {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.telemetry .arrow {
-  color: var(--turf);
-}
-.fake-tag {
-  color: var(--chalk-faint);
-  text-transform: none;
-  letter-spacing: 0;
-}
-.telemetry-list {
-  flex: 1;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0 -6px;
-  padding: 0 6px;
-}
-.tele-item {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  border-bottom: 1px solid var(--line);
-}
-.tele-time {
-  color: var(--chalk-faint);
-  font-size: 10.5px;
-}
-.tele-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.tele-dot.metric {
-  background: var(--turf);
-}
-.tele-dot.lifecycle {
-  background: var(--amber);
-}
-.tele-name {
-  color: var(--chalk);
-}
-.tele-tags {
-  grid-column: 3;
-  color: var(--chalk-faint);
-  font-size: 10.5px;
-  justify-self: end;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ── PR banner + error ──────────────────────────────────────────────────────────────────── */

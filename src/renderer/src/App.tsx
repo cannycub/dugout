@@ -2,41 +2,29 @@ import { useCallback, useEffect, useState } from "react";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
-import type { DugoutEvent } from "../../shared/dugout-api.js";
 import { useDugout } from "./dugout-context.js";
-import {
-  StatusRibbon,
-  StoryPanel,
-  CoachCalls,
-  SpecLineup,
-  TelemetryLog,
-  PrBanner,
-} from "./components.js";
+import { StatusRibbon, StoryPanel, CoachCalls, SpecLineup, PrBanner } from "./components.js";
 
 const STORY_KEY = "DUG-101";
 const DECLARED_REPOS = ["widget-api", "pipeline"];
-const MAX_EVENTS = 60;
 
 export function App() {
   const dugout = useDugout();
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [story, setStory] = useState<Story | null>(null);
   const [prs, setPrs] = useState<PullRequest[]>([]);
-  const [events, setEvents] = useState<DugoutEvent[]>([]);
   const [reviewSel, setReviewSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the seed ticket + any existing run-state, and subscribe to telemetry.
+  // Load the seed ticket + any existing run-state. (Telemetry still flows to the metrics port /
+  // Datadog in the background; it is intentionally not surfaced in the UI.)
   useEffect(() => {
     void (async () => {
       const tickets = await dugout.listTickets();
       setTicket(tickets.find((t) => t.key === STORY_KEY) ?? tickets[0] ?? null);
       setStory(await dugout.getStory(STORY_KEY));
     })();
-    return dugout.onEvent((e) => {
-      setEvents((prev) => [e, ...prev].slice(0, MAX_EVENTS));
-    });
   }, [dugout]);
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
@@ -110,10 +98,6 @@ export function App() {
 
         <div className="col col-center">
           <SpecLineup story={story} reviewSel={reviewSel} onToggleReview={onToggleReview} />
-        </div>
-
-        <div className="col col-right">
-          <TelemetryLog events={events} />
         </div>
       </main>
 
