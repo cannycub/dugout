@@ -38,18 +38,11 @@ jobs:
       - name: Install system libraries for Electron
         run: npx playwright install-deps chromium
 
-      # Electron 42 ships no postinstall, so its binary downloads lazily on first
-      # launch and races under Playwright. Fetch it deterministically up front.
-      # The installer downloads + extracts (dist/electron, electron.d.ts) but in CI
-      # intermittently skips its final write of path.txt — the pointer file Playwright
-      # reads to find the binary. So if the binary extracted but path.txt is absent,
-      # write it ourselves (linux binary is dist/electron); fail loudly if the binary
-      # genuinely didn't extract.
+      # Electron 42's lazy installer exits before extract-zip finishes under Node 24
+      # in CI, leaving the binary unextracted (see scripts/ensure-electron.mjs).
+      # Fetch + extract it deterministically up front instead.
       - name: Install Electron binary
-        run: |
-          DEBUG='@electron/get:*' node node_modules/electron/install.js
-          echo "--- dist after install ---"; ls -la node_modules/electron/dist || true
-          echo "--- path.txt ---"; cat node_modules/electron/path.txt || echo "(missing)"
+        run: node scripts/ensure-electron.mjs
 
       # Real Electron needs a display — give xvfb an actual screen, not the bare
       # default, so the renderer window can initialise.
