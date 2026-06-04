@@ -18,8 +18,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Match the engines.node floor; node:sqlite (>=22.5) ships in this line.
-          node-version: "22.12.0"
+          # node:sqlite is flag-gated on the 22.x/23.x lines; it is only available
+          # unflagged from Node 24 (the version Electron 42 bundles, per ADR-0002).
+          node-version: "24"
           cache: npm
 
       - run: npm ci
