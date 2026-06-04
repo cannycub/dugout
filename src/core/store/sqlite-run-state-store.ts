@@ -1,30 +1,30 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import type { StoryRunState, SpecRunState, SpecStatus, StoryStatus } from "../domain.js";
 import type { RunStateStore } from "./run-state-store.js";
 
-interface StoryRow {
-  key: string;
-  title: string;
-  status: string;
-}
+/** A raw row from node:sqlite: column name → value (the untyped DB boundary). */
+type Row = Record<string, unknown>;
 
-interface SpecStatusRow {
-  spec_id: string;
-  story_key: string;
-  status: string;
+/** Read a TEXT column as a string at the DB boundary. */
+function text(row: Row, column: string): string {
+  return String(row[column]);
 }
 
 /**
  * SQLite-backed ephemeral run-state: just the lifecycle position (story + per-spec status).
  * Spec contract (markdown + plan) lives in the SpecStore (git), so it is deliberately absent here.
+ *
+ * Uses Node's built-in `node:sqlite` (no native module), so the identical code runs under both
+ * the Node test runner and Electron — no ABI rebuild. It sits behind {@link RunStateStore}, so
+ * swapping the engine never touches orchestration.
  */
 export class SqliteRunStateStore implements RunStateStore {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
 
   constructor(filename: string) {
-    this.db = new Database(filename);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
+    this.db = new DatabaseSync(filename);
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS stories (
         key    TEXT PRIMARY KEY,
@@ -46,32 +46,33 @@ export class SqliteRunStateStore implements RunStateStore {
       `INSERT INTO stories (key, title, status) VALUES (@key, @title, @status)
        ON CONFLICT(key) DO UPDATE SET title = excluded.title, status = excluded.status`,
     );
-    const deleteSpecs = this.db.prepare(`DELETE FROM spec_status WHERE story_key = ?`);
+    const deleteSpecs = this.db.prepare(`DELETE FROM spec_status WHERE story_key = @key`);
     const insertSpec = this.db.prepare(
       `INSERT INTO spec_status (spec_id, story_key, status, ord)
        VALUES (@spec_id, @story_key, @status, @ord)`,
     );
 
-    const tx = this.db.transaction((s: StoryRunState) => {
-      upsertStory.run({ key: s.key, title: s.title, status: s.status });
-      deleteSpecs.run(s.key);
-      s.specs.forEach((spec, ord) => {
-        insertSpec.run({ spec_id: spec.specId, story_key: s.key, status: spec.status, ord });
+    this.transaction(() => {
+      upsertStory.run({ key: state.key, title: state.title, status: state.status });
+      deleteSpecs.run({ key: state.key });
+      state.specs.forEach((spec, ord) => {
+        insertSpec.run({
+          spec_id: spec.specId,
+          story_key: state.key,
+          status: spec.status,
+          ord,
+        });
       });
     });
-    tx(state);
   }
 
   get(storyKey: string): StoryRunState | undefined {
-    const row = this.db.prepare(`SELECT * FROM stories WHERE key = ?`).get(storyKey) as
-      | StoryRow
-      | undefined;
-    if (!row) return undefined;
-    return this.hydrate(row);
+    const row = this.db.prepare(`SELECT * FROM stories WHERE key = @key`).get({ key: storyKey });
+    return row ? this.hydrate(row) : undefined;
   }
 
   all(): StoryRunState[] {
-    const rows = this.db.prepare(`SELECT * FROM stories ORDER BY key`).all() as StoryRow[];
+    const rows = this.db.prepare(`SELECT * FROM stories ORDER BY key`).all();
     return rows.map((row) => this.hydrate(row));
   }
 
@@ -79,18 +80,31 @@ export class SqliteRunStateStore implements RunStateStore {
     this.db.close();
   }
 
-  private hydrate(row: StoryRow): StoryRunState {
+  /** node:sqlite has no transaction() helper, so wrap BEGIN/COMMIT with rollback on throw. */
+  private transaction(fn: () => void): void {
+    this.db.exec("BEGIN");
+    try {
+      fn();
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  private hydrate(row: Row): StoryRunState {
+    const key = text(row, "key");
     const specRows = this.db
-      .prepare(`SELECT * FROM spec_status WHERE story_key = ? ORDER BY ord`)
-      .all(row.key) as SpecStatusRow[];
+      .prepare(`SELECT * FROM spec_status WHERE story_key = @key ORDER BY ord`)
+      .all({ key });
     const specs: SpecRunState[] = specRows.map((s) => ({
-      specId: s.spec_id,
-      status: s.status as SpecStatus,
+      specId: text(s, "spec_id"),
+      status: text(s, "status") as SpecStatus,
     }));
     return {
-      key: row.key,
-      title: row.title,
-      status: row.status as StoryStatus,
+      key,
+      title: text(row, "title"),
+      status: text(row, "status") as StoryStatus,
       specs,
     };
   }
