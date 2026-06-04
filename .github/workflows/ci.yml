@@ -1,4 +1,6 @@
 name: CI
+# Rationale for the Node 24 pin, system-lib install, and Electron-binary handling
+# below lives in docs/adr/0003-ci-runs-all-tests-including-electron-e2e.md.
 
 on:
   pull_request:
