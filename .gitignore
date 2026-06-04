@@ -50,6 +50,9 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 .vitest/
+test-results/
+playwright-report/
+.last-run.json
 
 # Caches
 .cache/

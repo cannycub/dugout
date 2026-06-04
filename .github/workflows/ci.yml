@@ -1,0 +1,52 @@
+name: CI
+# Rationale for the Node 24 pin, system-lib install, and Electron-binary handling
+# below lives in docs/adr/0003-ci-runs-all-tests-including-electron-e2e.md.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # node:sqlite is flag-gated on the 22.x/23.x lines; it is only available
+          # unflagged from Node 24 (the version Electron 42 bundles, per ADR-0002).
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      # Real Electron needs native system libraries (libnss3, libgbm, libasound2,
+      # libgtk-3, …) that aren't on the bare ubuntu runner — without them the
+      # launch fails (surfacing confusingly, e.g. as a path.txt ENOENT). Playwright
+      # maintains this dependency list; chromium's deps cover Electron.
+      - name: Install system libraries for Electron
+        run: npx playwright install-deps chromium
+
+      # Electron 42's lazy installer exits before extract-zip finishes under Node 24
+      # in CI, leaving the binary unextracted (see scripts/ensure-electron.mjs).
+      # Fetch + extract it deterministically up front instead.
+      - name: Install Electron binary
+        run: node scripts/ensure-electron.mjs
+
+      # Real Electron needs a display — give xvfb an actual screen, not the bare
+      # default, so the renderer window can initialise.
+      - name: E2E tests (Playwright + Electron)
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" npm run test:e2e
