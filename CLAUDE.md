@@ -31,3 +31,9 @@ the company org later).
 - Side-effects (Jira, Datadog) are best-effort and must never block the build.
 - Keep the React renderer behind the IPC/HTTP abstraction — never call Electron APIs directly
   from components.
+- **All UI work MUST use the `frontend-design` skill** — any time you build or change web
+  components, pages, or app layout, invoke `frontend-design` first. This is a standing rule,
+  not a one-off.
+- **Spec content is canonical in git** (the `SpecStore` seam); **SQLite holds only ephemeral,
+  rebuildable run-state** (lifecycle status, sandbox/branch bookkeeping). Never persist spec
+  content as run-state.
