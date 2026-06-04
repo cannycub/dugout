@@ -31,6 +31,12 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+      # Electron 42 has no postinstall script; its binary downloads lazily on
+      # first launch, which races and fails under Playwright in CI (missing
+      # node_modules/electron/path.txt). Fetch it deterministically up front.
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
       # test:e2e builds the app then launches real Electron via Playwright, so it
       # needs a display — run it under xvfb (preinstalled on ubuntu runners).
       - name: E2E tests (Playwright + Electron)
