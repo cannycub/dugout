@@ -9,18 +9,20 @@
 // before extract-zip finishes — leaving dist/ empty and path.txt unwritten, so
 // Playwright fails with `electron.launch: ENOENT … node_modules/electron/path.txt`.
 //
-// This mirrors install.js but awaits each step, so the process cannot exit until
-// extraction and the path.txt write have completed. It reuses Electron's own
-// bundled @electron/get + extract-zip (resolved via install.js's module context),
-// and is a no-op when the binary is already present (e.g. local dev).
+// This mirrors install.js but (a) awaits the download and (b) extracts with the
+// system `unzip` instead of Electron's bundled extract-zip — under Node 24 in CI
+// that extract-zip promise never settles on the (checksum-valid) zip, hanging the
+// install ("unsettled top-level await"). @electron/get's download works fine, so
+// we keep it and only swap the extractor. No-op when the binary already exists
+// (e.g. local dev), so this never needs `unzip` on a machine that already has it.
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 const elDir = path.resolve("node_modules/electron");
 const require = createRequire(path.join(elDir, "install.js"));
 const { downloadArtifact } = require("@electron/get");
-const extract = require("extract-zip");
 const { version } = require(path.join(elDir, "package.json"));
 const checksums = require(path.join(elDir, "checksums.json"));
 
@@ -48,7 +50,11 @@ if (fs.existsSync(path.join(distPath, platformPath)) && fs.existsSync(pathTxt)) 
     arch: process.arch,
     checksums,
   });
-  await extract(zip, { dir: distPath });
+  fs.mkdirSync(distPath, { recursive: true });
+  // Synchronous extraction — no promise to leave unsettled. `unzip` ships on the
+  // ubuntu runners; -o overwrites, -q is quiet.
+  execFileSync("unzip", ["-oq", zip, "-d", distPath], { stdio: "inherit" });
+  fs.chmodSync(path.join(distPath, platformPath), 0o755);
   await fs.promises.writeFile(pathTxt, platformPath);
   console.log(`electron extracted to ${distPath}; wrote path.txt -> ${platformPath}`);
 }
