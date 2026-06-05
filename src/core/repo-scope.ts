@@ -17,13 +17,12 @@ export interface RepoMatch {
 
 /**
  * A catalog identity put in scope for ONE story, bound (or not) to the developer's local clone
- * (CONTEXT.md "Declared repo"). Flows into `draft`. `clone.status` may be "not-cloned"; execute
- * mode (later) is what requires a path (ADR-0004).
+ * (CONTEXT.md "Declared repo"). Structurally a {@link RepoMatch} — a declared repo IS a search
+ * match the developer chose — so it's an alias, not a second shape to convert between. Flows into
+ * `draft`. `clone.status` may be "not-cloned"; execute mode (later) is what requires a path
+ * (ADR-0004).
  */
-export interface DeclaredRepo {
-  identity: RepoIdentity;
-  clone: CloneBinding;
-}
+export type DeclaredRepo = RepoMatch;
 
 /**
  * Repo-scope façade — binds catalog identities to discovered local clones to produce the story's
