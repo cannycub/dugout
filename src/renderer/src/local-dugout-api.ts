@@ -11,7 +11,8 @@ import type { MetricsPort, MetricEvent } from "../../core/ports/metrics.js";
 import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
 
 export interface LocalSeed {
-  ticket: Ticket;
+  /** The developer's assigned tickets (their roster). */
+  tickets: Ticket[];
   draft: DraftResult;
   /** Catalog + clone discovery backing the declare-repos step (ADR-0006). */
   repoScope: RepoScope;
@@ -34,7 +35,7 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
   };
 
   const orchestrator = new Orchestrator({
-    jira: new FakeJira({ tickets: [seed.ticket] }),
+    jira: new FakeJira({ tickets: seed.tickets }),
     executor: new FakeExecutor({ draft: seed.draft }),
     github: new FakeGitHub(),
     metrics,

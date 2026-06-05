@@ -4,34 +4,45 @@ import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
 import type { DeclaredRepo } from "../../core/repo-scope.js";
 import { useDugout } from "./dugout-context.js";
-import { StatusRibbon, StoryPanel, CoachCalls, SpecLineup, PrBanner } from "./components.js";
-
-const STORY_KEY = "DUG-101";
-const DECLARED_REPOS = ["widget-api", "pipeline"];
-// Temporary until D2's declare-repos UI builds DeclaredRepo[] from searchRepos results.
-const asDeclared = (name: string): DeclaredRepo => ({
-  identity: { name, remote: "" },
-  clone: { status: "not-cloned" },
-});
+import {
+  StatusRibbon,
+  StoryPanel,
+  CoachCalls,
+  SpecLineup,
+  PrBanner,
+  TicketRoster,
+  DeclareRepos,
+} from "./components.js";
 
 export function App() {
   const dugout = useDugout();
-  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [story, setStory] = useState<Story | null>(null);
   const [prs, setPrs] = useState<PullRequest[]>([]);
   const [reviewSel, setReviewSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the seed ticket + any existing run-state. (Telemetry still flows to the metrics port /
-  // Datadog in the background; it is intentionally not surfaced in the UI.)
+  // Load the developer's assigned tickets (their roster). Telemetry still flows to the metrics
+  // port / Datadog in the background; it is intentionally not surfaced in the UI.
   useEffect(() => {
-    void (async () => {
-      const tickets = await dugout.listTickets();
-      setTicket(tickets.find((t) => t.key === STORY_KEY) ?? tickets[0] ?? null);
-      setStory(await dugout.getStory(STORY_KEY));
-    })();
+    void dugout.listTickets().then(setTickets);
   }, [dugout]);
+
+  // When a ticket is picked, load any existing run-state for it.
+  useEffect(() => {
+    if (!selectedKey) {
+      setStory(null);
+      return;
+    }
+    void dugout.getStory(selectedKey).then(setStory);
+  }, [dugout, selectedKey]);
+
+  const selectedTicket = tickets.find((t) => t.key === selectedKey) ?? null;
+  const repoNames = story
+    ? [...new Set(story.specs.map((s) => s.repo))]
+    : [];
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -54,20 +65,27 @@ export function App() {
     });
   }, []);
 
-  const onDraft = () =>
-    guard(async () => setStory(await dugout.draft(STORY_KEY, DECLARED_REPOS.map(asDeclared))));
+  const key = selectedKey ?? "";
+  const onDeclareAndDraft = (repos: DeclaredRepo[]) =>
+    guard(async () => setStory(await dugout.draft(key, repos)));
   const onApprove = () =>
-    guard(async () =>
-      setStory(await dugout.approve(STORY_KEY, { reviewRequired: [...reviewSel] })),
-    );
-  const onRun = () => guard(async () => setStory(await dugout.run(STORY_KEY)));
-  const onResume = () => guard(async () => setStory(await dugout.resume(STORY_KEY)));
-  const onRestart = () => guard(async () => setStory(await dugout.restart(STORY_KEY)));
+    guard(async () => setStory(await dugout.approve(key, { reviewRequired: [...reviewSel] })));
+  const onRun = () => guard(async () => setStory(await dugout.run(key)));
+  const onResume = () => guard(async () => setStory(await dugout.resume(key)));
+  const onRestart = () => guard(async () => setStory(await dugout.restart(key)));
   const onCreatePRs = () =>
     guard(async () => {
-      setPrs(await dugout.createPullRequests(STORY_KEY));
-      setStory(await dugout.getStory(STORY_KEY));
+      setPrs(await dugout.createPullRequests(key));
+      setStory(await dugout.getStory(key));
     });
+
+  const onBackToRoster = () => {
+    setSelectedKey(null);
+    setStory(null);
+    setPrs([]);
+    setReviewSel(new Set());
+    setError(null);
+  };
 
   return (
     <div className="app">
@@ -87,25 +105,41 @@ export function App() {
       {error && <div className="error-bar">⚠ {error}</div>}
       <PrBanner prs={prs} />
 
-      <main className="stage">
-        <div className="col col-left">
-          <StoryPanel ticket={ticket} repos={DECLARED_REPOS} />
-          <CoachCalls
-            story={story}
-            busy={busy}
-            onDraft={onDraft}
-            onApprove={onApprove}
-            onRun={onRun}
-            onResume={onResume}
-            onRestart={onRestart}
-            onCreatePRs={onCreatePRs}
-          />
-        </div>
+      {!selectedKey ? (
+        <main className="stage stage-roster">
+          <TicketRoster tickets={tickets} onSelect={setSelectedKey} />
+        </main>
+      ) : (
+        <main className="stage">
+          <div className="col col-left">
+            <StoryPanel ticket={selectedTicket} repos={repoNames} />
+            {story ? (
+              <CoachCalls
+                story={story}
+                busy={busy}
+                onDraft={() => undefined}
+                onApprove={onApprove}
+                onRun={onRun}
+                onResume={onResume}
+                onRestart={onRestart}
+                onCreatePRs={onCreatePRs}
+              />
+            ) : (
+              <button type="button" className="back-btn" onClick={onBackToRoster}>
+                ◂ Back to the roster
+              </button>
+            )}
+          </div>
 
-        <div className="col col-center">
-          <SpecLineup story={story} reviewSel={reviewSel} onToggleReview={onToggleReview} />
-        </div>
-      </main>
+          <div className="col col-center">
+            {story ? (
+              <SpecLineup story={story} reviewSel={reviewSel} onToggleReview={onToggleReview} />
+            ) : (
+              <DeclareRepos onDeclare={onDeclareAndDraft} busy={busy} />
+            )}
+          </div>
+        </main>
+      )}
 
       <footer className="footer">
         Assistive, never autonomous · stops at “PR created” · never auto-merges
