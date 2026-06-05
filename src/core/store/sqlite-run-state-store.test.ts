@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { SqliteRunStateStore } from "./sqlite-run-state-store.js";
 import type { StoryRunState } from "../domain.js";
 
@@ -27,6 +28,7 @@ function sampleRunState(): StoryRunState {
       { specId: "DUG-1-spec-1", status: "merged" },
       { specId: "DUG-1-spec-2", status: "running" },
     ],
+    declaredRepos: ["widget-api", "pipeline"],
   };
 }
 
@@ -51,6 +53,22 @@ describe("SqliteRunStateStore", () => {
     expect(second.get("DUG-1")?.status).toBe("executing");
     expect(second.get("DUG-1")?.specs.map((s) => s.status)).toEqual(["merged", "running"]);
     second.close();
+  });
+
+  it("migrates a legacy db that predates the declared_repos column", () => {
+    const path = tempDbPath();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE stories (key TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL);
+      CREATE TABLE spec_status (spec_id TEXT PRIMARY KEY, story_key TEXT NOT NULL, status TEXT NOT NULL, ord INTEGER NOT NULL);
+    `);
+    legacy.prepare(`INSERT INTO stories (key, title, status) VALUES ('DUG-9', 'Old', 'executing')`).run();
+    legacy.close();
+
+    // Opening the store must add the column (not throw) and default existing rows to empty scope.
+    const store = new SqliteRunStateStore(path);
+    expect(store.get("DUG-9")?.declaredRepos).toEqual([]);
+    store.close();
   });
 
   it("upserts on save, keeping a single story per key with updated statuses", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness } from "./test-harness.js";
+import { makeHarness, declared } from "./test-harness.js";
 
 describe("persistence split (SpecStore vs RunStateStore)", () => {
   it("stores spec content in the SpecStore and only status in run-state, assembling on read", async () => {
@@ -7,7 +7,7 @@ describe("persistence split (SpecStore vs RunStateStore)", () => {
       draft: [{ repo: "web", markdown: "# Spec: the canonical contract" }],
     });
 
-    await orchestrator.draftStory("DUG-1", { repos: ["web"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
 
     // Canonical content lives in the SpecStore (git), with the markdown.
     const content = specStore.get("DUG-1");
@@ -32,7 +32,7 @@ describe("persistence split (SpecStore vs RunStateStore)", () => {
       ],
     });
 
-    await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"].map(declared) });
     await orchestrator.approveStory("DUG-1", { reviewRequired: ["DUG-1-spec-1"] });
 
     // The plan is part of the contract (canonical-in-git), not just run-state.

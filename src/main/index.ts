@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
+import type { DeclaredRepo } from "../core/repo-scope.js";
 import { createOrchestrator, broadcast } from "./orchestrator-host.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -46,11 +47,16 @@ function registerIpc(orchestrator: Orchestrator): void {
 
   ipcMain.handle(CHANNELS.getStory, (_e, key: string) => orchestrator.getStory(key) ?? null);
 
-  ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: string[]) => {
+  ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: DeclaredRepo[]) => {
     const story = await orchestrator.draftStory(key, { repos });
     afterTransition(key, story.status);
     return story;
   });
+
+  ipcMain.handle(CHANNELS.searchRepos, (_e, query: string) => orchestrator.searchRepos(query));
+  ipcMain.handle(CHANNELS.declareRepos, (_e, names: string[]) => orchestrator.declareRepos(names));
+  ipcMain.handle(CHANNELS.rescanRepos, () => orchestrator.rescanRepos());
+  ipcMain.handle(CHANNELS.listWorkspaceRoots, () => orchestrator.listWorkspaceRoots());
 
   ipcMain.handle(CHANNELS.approve, async (_e, key: string, preflight: Preflight) => {
     const story = await orchestrator.approveStory(key, preflight);
@@ -83,14 +89,18 @@ function registerIpc(orchestrator: Orchestrator): void {
   });
 }
 
-app.whenReady().then(() => {
-  const orchestrator = createOrchestrator(app.getPath("userData"));
+app.whenReady().then(async () => {
+  const orchestrator = await createOrchestrator(app.getPath("userData"));
   registerIpc(orchestrator);
   createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((err) => {
+  // Startup wiring must not fail silently into a windowless app — surface and exit.
+  console.error("[dugout] failed to start:", err);
+  app.quit();
 });
 
 app.on("window-all-closed", () => {

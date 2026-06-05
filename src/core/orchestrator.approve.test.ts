@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness } from "./test-harness.js";
+import { makeHarness, declared } from "./test-harness.js";
 import type { DraftedSpec } from "./ports/executor.js";
 
 function setup(draftedSpecs: DraftedSpec[]) {
@@ -15,7 +15,7 @@ describe("spec approval", () => {
       { repo: "web", markdown: "# Spec A" },
       { repo: "api", markdown: "# Spec B" },
     ]);
-    await orchestrator.draftStory("DUG-1", { repos: ["web", "api"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web", "api"].map(declared) });
 
     const story = await orchestrator.approveStory("DUG-1", {});
 
@@ -28,7 +28,7 @@ describe("spec approval", () => {
       { repo: "web", markdown: "# Spec A" },
       { repo: "pipeline", markdown: "# Spec B (replay)", isReplaySpec: true },
     ]);
-    await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"].map(declared) });
 
     const story = await orchestrator.approveStory("DUG-1", {});
 
@@ -40,7 +40,7 @@ describe("spec approval", () => {
       { repo: "web", markdown: "# Spec A" },
       { repo: "api", markdown: "# Spec B" },
     ]);
-    await orchestrator.draftStory("DUG-1", { repos: ["web", "api"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web", "api"].map(declared) });
 
     const story = await orchestrator.approveStory("DUG-1", {
       reviewRequired: ["DUG-1-spec-1"],

@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import type { Story, Spec } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
+import type { RepoMatch, CloneBinding } from "../../core/repo-scope.js";
+import { useDugout } from "./dugout-context.js";
 import { SPEC_META, RIBBON_STAGES, stageIndex } from "./lifecycle.js";
 
 /* ── Status ribbon: the lifecycle base path ─────────────────────────────────────────────── */
@@ -208,6 +211,181 @@ function SpecCard({ spec, index, editable, reviewSelected, replayLocked, onToggl
         )}
       </div>
     </motion.div>
+  );
+}
+
+/* ── Ticket roster: pick the play (D1) ──────────────────────────────────────────────────── */
+
+export function TicketRoster({
+  tickets,
+  onSelect,
+}: {
+  tickets: Ticket[];
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <div className="field roster-field">
+      <div className="field-head">
+        <span className="panel-eyebrow">Today's roster</span>
+        <span className="field-count">
+          {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
+        </span>
+      </div>
+      {tickets.length === 0 ? (
+        <p className="muted">No tickets assigned to you. Nothing to call from the dugout yet.</p>
+      ) : (
+        <div className="roster">
+          {tickets.map((ticket, i) => (
+            <motion.button
+              type="button"
+              className="roster-card"
+              key={ticket.key}
+              onClick={() => onSelect(ticket.key)}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.06, type: "spring", stiffness: 260, damping: 26 }}
+            >
+              <span className="roster-key">{ticket.key}</span>
+              <h3 className="roster-title">{ticket.title}</h3>
+              <p className="roster-desc">{ticket.description}</p>
+              <span className="roster-cta">Take the mound ▸</span>
+            </motion.button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Declare repos: field your repos (D2) ───────────────────────────────────────────────── */
+
+const CLONE_META: Record<CloneBinding["status"], { label: string; tone: string }> = {
+  cloned: { label: "cloned", tone: "cloned" },
+  "not-cloned": { label: "not cloned", tone: "not-cloned" },
+  ambiguous: { label: "ambiguous", tone: "ambiguous" },
+};
+
+function CloneBadge({ clone }: { clone: CloneBinding }) {
+  const meta = CLONE_META[clone.status];
+  const detail =
+    clone.status === "cloned"
+      ? clone.path
+      : clone.status === "ambiguous"
+        ? `${clone.candidates.length} clones`
+        : "selectable";
+  return (
+    <span className={`clone-badge ${meta.tone}`} title={detail}>
+      <span className="clone-dot" />
+      {meta.label}
+    </span>
+  );
+}
+
+export function DeclareRepos({
+  onDeclare,
+  busy,
+}: {
+  onDeclare: (names: string[]) => void;
+  busy: boolean;
+}) {
+  const dugout = useDugout();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<RepoMatch[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rescanning, setRescanning] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void dugout.searchRepos(query).then((r) => {
+      if (live) setResults(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [dugout, query]);
+
+  const toggle = (name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const rescan = async () => {
+    setRescanning(true);
+    try {
+      await dugout.rescanRepos();
+      setResults(await dugout.searchRepos(query));
+    } finally {
+      setRescanning(false);
+    }
+  };
+
+  // Hand the chosen names up; binding is re-resolved server-side at declare time.
+  const declare = () => onDeclare([...selected]);
+
+  return (
+    <div className="field declare-field">
+      <div className="field-head">
+        <span className="panel-eyebrow">Field your repos</span>
+        <button type="button" className="rescan-btn" onClick={rescan} disabled={rescanning}>
+          {rescanning ? "rescanning…" : "↻ rescan"}
+        </button>
+      </div>
+
+      <input
+        className="declare-search"
+        type="text"
+        placeholder="Search the catalog…"
+        aria-label="Search the catalog"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
+      <div className="repo-results">
+        {results.length === 0 ? (
+          <p className="muted small">No repos match “{query}”.</p>
+        ) : (
+          results.map((match) => {
+            const isSel = selected.has(match.identity.name);
+            return (
+              <button
+                type="button"
+                className={`repo-result ${isSel ? "selected" : ""}`}
+                key={match.identity.name}
+                aria-pressed={isSel}
+                onClick={() => toggle(match.identity.name)}
+              >
+                <span className="repo-check" aria-hidden>
+                  {isSel ? "✓" : ""}
+                </span>
+                <span className="repo-meta">
+                  <span className="result-name">{match.identity.name}</span>
+                  <span className="result-remote">{match.identity.remote}</span>
+                </span>
+                <CloneBadge clone={match.clone} />
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      <div className="declare-actions">
+        <span className="declare-count">
+          {selected.size} {selected.size === 1 ? "repo" : "repos"} declared
+        </span>
+        <button
+          type="button"
+          className="call-btn clay declare-btn"
+          disabled={busy || selected.size === 0}
+          onClick={declare}
+        >
+          {busy ? "Working…" : `Declare ${selected.size || ""} & draft ▸`}
+        </button>
+      </div>
+    </div>
   );
 }
 

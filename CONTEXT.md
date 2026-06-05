@@ -18,8 +18,10 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   specs. Each spec restates the relevant acceptance criteria, defines a test-first test plan,
   and maps to exactly one repo → one branch → one PR → one CI run. Specs are **canonical as
   markdown in git**.
-- **Fan-out** — the decomposition of a story into its spec set, including order and which
-  spec(s) are replay specs. Reviewed first, because it is the highest-leverage decision.
+- **Fan-out** — the decomposition of a story into its spec set, including order, the repo each
+  spec is assigned to (drawn from the story's declared repos), and which spec(s) are replay
+  specs. The agent proposes it; the developer corrects it at the approval gate. Reviewed first,
+  because it is the highest-leverage decision.
 - **Replay** — data-pipeline reprocessing: a recorded input stream replayed through the entire
   stack, producing gigabytes of output queryable via AWS Athena. The team's primary testing
   method. Output is **human-verified**, never agent-graded.
@@ -33,13 +35,28 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   sandbox (read-write), emits code + commits.
 - **Story branch** — the per-repo branch onto which green spec branches accumulate locally.
   Stays local until a single end-of-story push.
+- **Catalog** — the team-wide list of known repo identities (name + canonical remote). The
+  source of repo *suggestions*; team-owned, not machine-specific, and never derived from disk
+  layout.
+- **Workspace root** — a developer-chosen directory under which Dugout discovers local clones.
+  Identity is matched by remote, so no naming or nesting structure is enforced.
+- **Declared repo** — a catalog identity the developer puts in scope for a story, bound to their
+  local clone. The developer selects them from the (searchable) catalog *before* drafting; no
+  agent suggestion. Each spec in the fan-out is then assigned to exactly one declared repo.
 - **`review-required`** — a per-spec flag; when set, execution stops after the spec goes green
   for the developer's code review before the next spec stacks on it. Default-on for replay
   specs; the agent recommends it for performance-critical/concurrent specs.
 - **`needs-info`** — kickback state when a ticket is too thin to spec; the agent stops rather
   than guess. Also a Jira label.
-- **Cascade** — when changing an earlier spec invalidates later specs. v1 policy:
-  **flag-and-rerun** downstream specs, not magic-rewind.
+- **Cascade** — when an earlier change invalidates later specs, whether the agent changing an
+  earlier spec or the developer editing foundational code at a stop. v1 policy: **flag** the
+  affected downstream specs and let the **developer choose** which to rerun — no magic-rewind,
+  no impact-guessing.
+- **Stop** — any paused phase (a `review-required` stop, between specs, or at dev-complete)
+  during which the **developer is the single writer** on the story branch and may commit
+  directly (rename, small refactor, foundational change). Contrast a *running* spec, which only
+  the harness writes — the dev never steers a running spec (invariant 1). Ownership of the line
+  alternates by phase; "harness-owned" means single-writer-while-running, never human-forbidden.
 - **Port / adapter** — the interfaces orchestration depends on (executor, env/replay, Jira,
   GitHub, metrics). Adapters swap (local v1 → cloud later); orchestration does not change.
 

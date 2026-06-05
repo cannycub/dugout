@@ -4,6 +4,7 @@ import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
 import type { MetricsPort, MetricEvent } from "./ports/metrics.js";
 import type { EnvReplayPort } from "./ports/env-replay.js";
+import type { DeclaredRepo, RepoScope, RepoMatch } from "./repo-scope.js";
 import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
@@ -20,6 +21,8 @@ export interface OrchestratorDeps {
   specStore?: SpecStore;
   /** Ephemeral run-state (SQLite); defaults to in-memory. */
   store?: RunStateStore;
+  /** Catalog + clone discovery for the declare-repos step (Part A). Optional in tests. */
+  repoScope?: RepoScope;
 }
 
 /**
@@ -43,6 +46,31 @@ export class Orchestrator {
     return this.deps.jira.listAssignedTickets();
   }
 
+  /** Search the catalog for repos to declare; each match carries its local clone binding. */
+  async searchRepos(query: string): Promise<RepoMatch[]> {
+    return this.requireRepoScope().search(query);
+  }
+
+  /** Bind chosen catalog names to local clones for a story (CONTEXT.md "Declared repo"). */
+  async declareRepos(names: string[]): Promise<DeclaredRepo[]> {
+    return this.requireRepoScope().declare(names);
+  }
+
+  /** Re-scan workspace roots so newly-cloned repos bind (the dev clones mid-flight). */
+  async rescanRepos(): Promise<void> {
+    return this.requireRepoScope().rescan();
+  }
+
+  /** The developer's configured workspace roots (for display). */
+  async listWorkspaceRoots(): Promise<string[]> {
+    return this.requireRepoScope().roots();
+  }
+
+  private requireRepoScope(): RepoScope {
+    if (!this.deps.repoScope) throw new Error("repo scope not configured");
+    return this.deps.repoScope;
+  }
+
   /** Assembled snapshot of an active story (contract + run-state), if one exists. */
   getStory(storyKey: string): Story | undefined {
     const content = this.specStore.get(storyKey);
@@ -52,7 +80,7 @@ export class Orchestrator {
   }
 
   /** Draft the fan-out for a selected ticket (read-only, no sandbox). */
-  async draftStory(ticketKey: string, opts: { repos: string[] }): Promise<Story> {
+  async draftStory(ticketKey: string, opts: { repos: DeclaredRepo[] }): Promise<Story> {
     const tickets = await this.deps.jira.listAssignedTickets();
     const ticket = tickets.find((t) => t.key === ticketKey);
     if (!ticket) {
@@ -60,6 +88,17 @@ export class Orchestrator {
     }
 
     const result = await this.deps.executor.draft({ ticket, repos: opts.repos });
+
+    // The fan-out invariant (ADR-0006): every drafted spec must target a declared repo. A spec
+    // for an undeclared repo would have no clone binding at execute time — reject it now.
+    const declaredNames = new Set(opts.repos.map((r) => r.identity.name));
+    for (const drafted of result.specs) {
+      if (!declaredNames.has(drafted.repo)) {
+        throw new Error(
+          `Drafted spec targets undeclared repo "${drafted.repo}" (declared: ${[...declaredNames].join(", ") || "none"})`,
+        );
+      }
+    }
 
     const specs: Spec[] = result.specs.map((drafted, order) => ({
       id: `${ticket.key}-spec-${order + 1}`,
@@ -71,7 +110,13 @@ export class Orchestrator {
       order,
     }));
 
-    const story: Story = { key: ticket.key, title: ticket.title, status: "drafted", specs };
+    const story: Story = {
+      key: ticket.key,
+      title: ticket.title,
+      status: "drafted",
+      specs,
+      declaredRepos: opts.repos.map((r) => r.identity.name),
+    };
     this.persistContent(story);
     this.persistRun(story);
     return story;
@@ -275,6 +320,7 @@ export class Orchestrator {
       title: story.title,
       status: story.status,
       specs: story.specs.map((s) => ({ specId: s.id, status: s.status })),
+      declaredRepos: story.declaredRepos,
     };
     this.runState.save(state);
   }
@@ -287,7 +333,7 @@ function assemble(content: StorySpecs, run: StoryRunState): Story {
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((c) => ({ ...c, status: statusById.get(c.id) ?? "drafted" }));
-  return { key: content.key, title: run.title, status: run.status, specs };
+  return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
 }
 
 /** Fully-linked PR body: story id + the specs (and their AC) that landed in this repo. */

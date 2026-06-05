@@ -27,9 +27,10 @@ export class SqliteRunStateStore implements RunStateStore {
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS stories (
-        key    TEXT PRIMARY KEY,
-        title  TEXT NOT NULL,
-        status TEXT NOT NULL
+        key            TEXT PRIMARY KEY,
+        title          TEXT NOT NULL,
+        status         TEXT NOT NULL,
+        declared_repos TEXT NOT NULL DEFAULT '[]'
       );
       CREATE TABLE IF NOT EXISTS spec_status (
         spec_id   TEXT PRIMARY KEY,
@@ -39,12 +40,20 @@ export class SqliteRunStateStore implements RunStateStore {
       );
       CREATE INDEX IF NOT EXISTS spec_status_story_key ON spec_status(story_key);
     `);
+    // Migrate a pre-existing DB that lacks the declared_repos column (run-state is rebuildable,
+    // so an empty default is safe).
+    const columns = this.db.prepare(`PRAGMA table_info(stories)`).all();
+    if (!columns.some((c) => String((c as Row)["name"]) === "declared_repos")) {
+      this.db.exec(`ALTER TABLE stories ADD COLUMN declared_repos TEXT NOT NULL DEFAULT '[]'`);
+    }
   }
 
   save(state: StoryRunState): void {
     const upsertStory = this.db.prepare(
-      `INSERT INTO stories (key, title, status) VALUES (@key, @title, @status)
-       ON CONFLICT(key) DO UPDATE SET title = excluded.title, status = excluded.status`,
+      `INSERT INTO stories (key, title, status, declared_repos)
+       VALUES (@key, @title, @status, @declared_repos)
+       ON CONFLICT(key) DO UPDATE SET
+         title = excluded.title, status = excluded.status, declared_repos = excluded.declared_repos`,
     );
     const deleteSpecs = this.db.prepare(`DELETE FROM spec_status WHERE story_key = @key`);
     const insertSpec = this.db.prepare(
@@ -53,7 +62,12 @@ export class SqliteRunStateStore implements RunStateStore {
     );
 
     this.transaction(() => {
-      upsertStory.run({ key: state.key, title: state.title, status: state.status });
+      upsertStory.run({
+        key: state.key,
+        title: state.title,
+        status: state.status,
+        declared_repos: JSON.stringify(state.declaredRepos),
+      });
       deleteSpecs.run({ key: state.key });
       state.specs.forEach((spec, ord) => {
         insertSpec.run({
@@ -106,6 +120,7 @@ export class SqliteRunStateStore implements RunStateStore {
       title: text(row, "title"),
       status: text(row, "status") as StoryStatus,
       specs,
+      declaredRepos: JSON.parse(text(row, "declared_repos")) as string[],
     };
   }
 }

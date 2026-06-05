@@ -1,6 +1,7 @@
 import type {
   CreatePullRequestInput,
   GitHubPort,
+  OrgRepo,
   PullRequest,
   PushInput,
 } from "../ports/github.js";
@@ -9,6 +10,12 @@ import type {
 export class FakeGitHub implements GitHubPort {
   readonly pushes: PushInput[] = [];
   readonly pullRequests: CreatePullRequestInput[] = [];
+
+  constructor(private readonly orgRepos: OrgRepo[] = []) {}
+
+  async listOrgRepos(): Promise<OrgRepo[]> {
+    return this.orgRepos;
+  }
 
   async push(input: PushInput): Promise<void> {
     this.pushes.push(input);
