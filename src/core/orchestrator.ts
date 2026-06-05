@@ -4,7 +4,7 @@ import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
 import type { MetricsPort, MetricEvent } from "./ports/metrics.js";
 import type { EnvReplayPort } from "./ports/env-replay.js";
-import type { DeclaredRepo } from "./repo-scope.js";
+import type { DeclaredRepo, RepoScope, RepoMatch } from "./repo-scope.js";
 import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
@@ -21,6 +21,8 @@ export interface OrchestratorDeps {
   specStore?: SpecStore;
   /** Ephemeral run-state (SQLite); defaults to in-memory. */
   store?: RunStateStore;
+  /** Catalog + clone discovery for the declare-repos step (Part A). Optional in tests. */
+  repoScope?: RepoScope;
 }
 
 /**
@@ -42,6 +44,31 @@ export class Orchestrator {
 
   listAssignedTickets(): Promise<Ticket[]> {
     return this.deps.jira.listAssignedTickets();
+  }
+
+  /** Search the catalog for repos to declare; each match carries its local clone binding. */
+  async searchRepos(query: string): Promise<RepoMatch[]> {
+    return this.requireRepoScope().search(query);
+  }
+
+  /** Bind chosen catalog names to local clones for a story (CONTEXT.md "Declared repo"). */
+  async declareRepos(names: string[]): Promise<DeclaredRepo[]> {
+    return this.requireRepoScope().declare(names);
+  }
+
+  /** Re-scan workspace roots so newly-cloned repos bind (the dev clones mid-flight). */
+  async rescanRepos(): Promise<void> {
+    return this.requireRepoScope().rescan();
+  }
+
+  /** The developer's configured workspace roots (for display). */
+  async listWorkspaceRoots(): Promise<string[]> {
+    return this.requireRepoScope().roots();
+  }
+
+  private requireRepoScope(): RepoScope {
+    if (!this.deps.repoScope) throw new Error("repo scope not configured");
+    return this.deps.repoScope;
   }
 
   /** Assembled snapshot of an active story (contract + run-state), if one exists. */
