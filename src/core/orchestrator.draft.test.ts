@@ -23,4 +23,19 @@ describe("draft mode", () => {
     expect(spec.status).toBe("drafted");
     expect(spec.markdown).toContain("Add widget endpoint");
   });
+
+  it("rejects a fan-out that drafts a spec for an undeclared repo (ADR-0006)", async () => {
+    const { orchestrator } = makeHarness({
+      tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
+      // The executor fans out onto a repo the developer never put in scope.
+      draft: [
+        { repo: "web", markdown: "# Spec (web)" },
+        { repo: "pipeline", markdown: "# Spec (pipeline)" },
+      ],
+    });
+
+    await expect(
+      orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) }),
+    ).rejects.toThrow(/pipeline/);
+  });
 });

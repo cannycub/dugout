@@ -89,6 +89,17 @@ export class Orchestrator {
 
     const result = await this.deps.executor.draft({ ticket, repos: opts.repos });
 
+    // The fan-out invariant (ADR-0006): every drafted spec must target a declared repo. A spec
+    // for an undeclared repo would have no clone binding at execute time — reject it now.
+    const declaredNames = new Set(opts.repos.map((r) => r.identity.name));
+    for (const drafted of result.specs) {
+      if (!declaredNames.has(drafted.repo)) {
+        throw new Error(
+          `Drafted spec targets undeclared repo "${drafted.repo}" (declared: ${[...declaredNames].join(", ") || "none"})`,
+        );
+      }
+    }
+
     const specs: Spec[] = result.specs.map((drafted, order) => ({
       id: `${ticket.key}-spec-${order + 1}`,
       repo: drafted.repo,

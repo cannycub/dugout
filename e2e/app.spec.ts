@@ -17,10 +17,11 @@ test.afterAll(async () => {
 test("fake ticket flows select → declare → draft → approve → run → review stop → resume → PRs", async () => {
   await expect(win.getByText(/Stream widget events into the replay pipeline/)).toBeVisible();
 
-  // Pick the play off the roster, then declare a repo from the catalog.
+  // Pick the play off the roster, then declare the repos the seed story spans from the catalog.
   await win.getByRole("button", { name: /Stream widget events into the replay pipeline/ }).click();
   await win.getByRole("button", { name: /widget-api/ }).click();
-  await win.getByRole("button", { name: /declare 1 & draft/i }).click();
+  await win.getByRole("button", { name: /pipeline/ }).click();
+  await win.getByRole("button", { name: /declare 2 & draft/i }).click();
   await expect(win.getByText("replay spec", { exact: true })).toBeVisible();
 
   await win.getByRole("button", { name: /approve spec set/i }).click();
