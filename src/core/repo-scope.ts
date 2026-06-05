@@ -106,6 +106,7 @@ export function canonicalRemote(url: string | undefined): string {
   } else {
     s = s.replace(/^[a-z]+:\/\//i, ""); // drop scheme
     s = s.replace(/^[^/@]+@/, ""); // drop user@ (ssh://user@host/…)
+    s = s.replace(/^([^/:]+):\d+(?=\/|$)/, "$1"); // drop an explicit host port (ssh://host:22/…)
   }
   s = s.replace(/\/+$/, "").replace(/\.git$/i, "");
   return s.toLowerCase();
