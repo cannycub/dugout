@@ -27,7 +27,16 @@ export interface PullRequest {
   autoMerge: false;
 }
 
+/** A repo as listed by the org (the catalog source). */
+export interface OrgRepo {
+  name: string;
+  /** Canonical clone URL advertised by GitHub (e.g. the ssh or https remote). */
+  remote: string;
+}
+
 export interface GitHubPort {
   push(input: PushInput): Promise<void>;
   createPullRequest(input: CreatePullRequestInput): Promise<PullRequest>;
+  /** List the configured org's repos (the team catalog source). */
+  listOrgRepos(): Promise<OrgRepo[]>;
 }

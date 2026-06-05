@@ -31,7 +31,7 @@ export interface DeclaredRepo {
  * underneath, so it is not itself a port. Eager scan (cached), cheap in-memory filtering.
  */
 export class RepoScope {
-  private cache?: { catalog: RepoIdentity[]; clones: DiscoveredClone[] };
+  private cache: { catalog: RepoIdentity[]; clones: DiscoveredClone[] } | undefined;
 
   constructor(
     private readonly catalog: CatalogPort,
