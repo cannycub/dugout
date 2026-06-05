@@ -96,6 +96,10 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((err) => {
+  // Startup wiring must not fail silently into a windowless app — surface and exit.
+  console.error("[dugout] failed to start:", err);
+  app.quit();
 });
 
 app.on("window-all-closed", () => {

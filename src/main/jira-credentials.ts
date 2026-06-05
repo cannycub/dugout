@@ -30,8 +30,13 @@ export class JiraCredentialStore {
     } catch {
       return null;
     }
-    const json = this.safe.decryptString(encrypted);
-    return JSON.parse(json) as JiraCredentials;
+    // Decrypt/parse can fail on a corrupt file or one encrypted under a different OS keychain.
+    // Jira auth is best-effort and must never block startup (ADR-0005), so degrade to null.
+    try {
+      return JSON.parse(this.safe.decryptString(encrypted)) as JiraCredentials;
+    } catch {
+      return null;
+    }
   }
 
   async save(creds: JiraCredentials): Promise<void> {

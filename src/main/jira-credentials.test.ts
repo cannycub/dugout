@@ -30,4 +30,23 @@ describe("JiraCredentialStore", () => {
       token: "tok",
     });
   });
+
+  it("degrades to null (never throws) when the cred file can't be decrypted", async () => {
+    // A file encrypted on another machine / corrupt: decryptString throws. Jira auth is
+    // best-effort and must never block startup (ADR-0005), so load() returns null.
+    const throwingSafe: SafeStorageLike = {
+      ...fakeSafe,
+      decryptString: () => {
+        throw new Error("cannot decrypt: foreign keychain");
+      },
+    };
+    const file = join(dir, "jira.cred");
+    await new JiraCredentialStore(file, fakeSafe).save({
+      baseUrl: "https://acme.atlassian.net",
+      email: "d@a.com",
+      token: "tok",
+    });
+    const store = new JiraCredentialStore(file, throwingSafe);
+    expect(await store.load()).toBeNull();
+  });
 });
