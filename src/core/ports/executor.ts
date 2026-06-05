@@ -7,11 +7,12 @@
  */
 
 import type { Ticket } from "./jira.js";
+import type { DeclaredRepo } from "../repo-scope.js";
 
 export interface DraftInput {
   ticket: Ticket;
-  /** Repos declared in scope by the developer (agent may suggest; dev confirms). */
-  repos: string[];
+  /** Repos declared in scope by the developer, bound to local clones (ADR-0006). */
+  repos: DeclaredRepo[];
 }
 
 /** One single-repo spec proposed by the agent's fan-out. */

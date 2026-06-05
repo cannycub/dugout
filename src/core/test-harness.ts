@@ -10,6 +10,7 @@ import type { DraftedSpec, ExecuteOutcome } from "./ports/executor.js";
 import type { Ticket } from "./ports/jira.js";
 import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
+import type { DeclaredRepo } from "./repo-scope.js";
 
 const DEFAULT_TICKET: Ticket = {
   key: "DUG-1",
@@ -45,12 +46,24 @@ export function makeHarness(options: HarnessOptions) {
   return { orchestrator, jira, executor, github, metrics, envReplay, store, specStore };
 }
 
-/** Convenience: drive a story to `approved` with default pre-flight. */
+/**
+ * Build a `DeclaredRepo` from a catalog name with a synthetic identity + local clone. Tests that
+ * only care about the repo name (not clone resolution) use this to satisfy the widened `draft`
+ * signature (ADR-0006) without restating the full shape each time.
+ */
+export function declared(name: string): DeclaredRepo {
+  return {
+    identity: { name, remote: `git@github.com:acme/${name}.git` },
+    clone: { status: "cloned", path: `/ws/${name}` },
+  };
+}
+
+/** Convenience: drive a story to `approved` with default pre-flight. Accepts repo names. */
 export async function draftAndApprove(
   orchestrator: Orchestrator,
   repos: string[],
   ticketKey = "DUG-1",
 ) {
-  await orchestrator.draftStory(ticketKey, { repos });
+  await orchestrator.draftStory(ticketKey, { repos: repos.map(declared) });
   await orchestrator.approveStory(ticketKey, {});
 }

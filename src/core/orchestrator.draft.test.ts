@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness } from "./test-harness.js";
+import { makeHarness, declared } from "./test-harness.js";
 
 describe("draft mode", () => {
   it("drafts single-repo specs as markdown from a selected ticket", async () => {
@@ -13,7 +13,7 @@ describe("draft mode", () => {
     expect(tickets.map((t) => t.key)).toEqual(["DUG-1"]);
 
     // Declaring the repos in scope, the agent drafts the fan-out (read-only, no sandbox).
-    const story = await orchestrator.draftStory("DUG-1", { repos: ["web"] });
+    const story = await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
 
     expect(story.status).toBe("drafted");
     expect(story.specs).toHaveLength(1);

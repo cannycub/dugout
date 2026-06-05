@@ -3,6 +3,7 @@ import { Orchestrator } from "./orchestrator.js";
 import { FakeJira } from "./fakes/fake-jira.js";
 import { FakeExecutor } from "./fakes/fake-executor.js";
 import { FakeGitHub } from "./fakes/fake-github.js";
+import { declared } from "./test-harness.js";
 import { FakeEnvReplay } from "./fakes/fake-env-replay.js";
 import type { MetricsPort } from "./ports/metrics.js";
 
@@ -25,7 +26,7 @@ describe("best-effort side-effects", () => {
       envReplay: new FakeEnvReplay(),
     });
 
-    await orchestrator.draftStory("DUG-1", { repos: ["web"] });
+    await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
     await orchestrator.approveStory("DUG-1", {});
 
     const story = await orchestrator.runStory("DUG-1");

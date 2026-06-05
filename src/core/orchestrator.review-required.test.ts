@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness } from "./test-harness.js";
+import { makeHarness, declared } from "./test-harness.js";
 
 async function setupWithReviewRequiredFirstSpec() {
   const harness = makeHarness({
@@ -8,7 +8,7 @@ async function setupWithReviewRequiredFirstSpec() {
       { repo: "api", markdown: "# Spec B" },
     ],
   });
-  await harness.orchestrator.draftStory("DUG-1", { repos: ["web", "api"] });
+  await harness.orchestrator.draftStory("DUG-1", { repos: ["web", "api"].map(declared) });
   // Developer marks the first spec review-required at pre-flight.
   await harness.orchestrator.approveStory("DUG-1", { reviewRequired: ["DUG-1-spec-1"] });
   return harness;

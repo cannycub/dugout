@@ -2,11 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
+import type { DeclaredRepo } from "../../core/repo-scope.js";
 import { useDugout } from "./dugout-context.js";
 import { StatusRibbon, StoryPanel, CoachCalls, SpecLineup, PrBanner } from "./components.js";
 
 const STORY_KEY = "DUG-101";
 const DECLARED_REPOS = ["widget-api", "pipeline"];
+// Temporary until D2's declare-repos UI builds DeclaredRepo[] from searchRepos results.
+const asDeclared = (name: string): DeclaredRepo => ({
+  identity: { name, remote: "" },
+  clone: { status: "not-cloned" },
+});
 
 export function App() {
   const dugout = useDugout();
@@ -49,7 +55,7 @@ export function App() {
   }, []);
 
   const onDraft = () =>
-    guard(async () => setStory(await dugout.draft(STORY_KEY, DECLARED_REPOS)));
+    guard(async () => setStory(await dugout.draft(STORY_KEY, DECLARED_REPOS.map(asDeclared))));
   const onApprove = () =>
     guard(async () =>
       setStory(await dugout.approve(STORY_KEY, { reviewRequired: [...reviewSel] })),

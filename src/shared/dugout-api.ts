@@ -7,6 +7,7 @@
 import type { Story, Preflight } from "../core/domain.js";
 import type { Ticket } from "../core/ports/jira.js";
 import type { PullRequest } from "../core/ports/github.js";
+import type { DeclaredRepo } from "../core/repo-scope.js";
 
 /** A streamed telemetry event (metric emit or lifecycle transition) shown in the UI log. */
 export type DugoutEvent =
@@ -30,7 +31,7 @@ export const CHANNELS = {
 export interface DugoutApi {
   listTickets(): Promise<Ticket[]>;
   getStory(storyKey: string): Promise<Story | null>;
-  draft(storyKey: string, repos: string[]): Promise<Story>;
+  draft(storyKey: string, repos: DeclaredRepo[]): Promise<Story>;
   approve(storyKey: string, preflight: Preflight): Promise<Story>;
   run(storyKey: string): Promise<Story>;
   resume(storyKey: string): Promise<Story>;

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
+import type { DeclaredRepo } from "../core/repo-scope.js";
 import { createOrchestrator, broadcast } from "./orchestrator-host.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +47,7 @@ function registerIpc(orchestrator: Orchestrator): void {
 
   ipcMain.handle(CHANNELS.getStory, (_e, key: string) => orchestrator.getStory(key) ?? null);
 
-  ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: string[]) => {
+  ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: DeclaredRepo[]) => {
     const story = await orchestrator.draftStory(key, { repos });
     afterTransition(key, story.status);
     return story;

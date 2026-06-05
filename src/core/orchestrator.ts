@@ -4,6 +4,7 @@ import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
 import type { MetricsPort, MetricEvent } from "./ports/metrics.js";
 import type { EnvReplayPort } from "./ports/env-replay.js";
+import type { DeclaredRepo } from "./repo-scope.js";
 import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
@@ -52,7 +53,7 @@ export class Orchestrator {
   }
 
   /** Draft the fan-out for a selected ticket (read-only, no sandbox). */
-  async draftStory(ticketKey: string, opts: { repos: string[] }): Promise<Story> {
+  async draftStory(ticketKey: string, opts: { repos: DeclaredRepo[] }): Promise<Story> {
     const tickets = await this.deps.jira.listAssignedTickets();
     const ticket = tickets.find((t) => t.key === ticketKey);
     if (!ticket) {
