@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { App } from "./App.js";
 import { DugoutProvider } from "./dugout-context.js";
 import { createLocalDugoutApi, type LocalSeed } from "./local-dugout-api.js";
@@ -114,5 +114,23 @@ describe("App — fake ticket through the full lifecycle, observable in the UI",
     // Open PRs → the never-auto-merged banner appears.
     fireEvent.click(prBtn);
     expect(await screen.findByText(/never auto-merged/i)).toBeTruthy();
+  });
+});
+
+describe("App — draft executor selector", () => {
+  it("reflects the current executor mode and switches it on click", async () => {
+    renderApp();
+
+    const fakes = await screen.findByRole("button", { name: "FAKES" });
+    const live = screen.getByRole("button", { name: "LIVE" });
+
+    // Starts in fakes (the safe default).
+    expect(fakes.getAttribute("aria-pressed")).toBe("true");
+    expect(live.getAttribute("aria-pressed")).toBe("false");
+
+    // Switching to live flips the active segment (persisted through the DugoutApi).
+    fireEvent.click(live);
+    await waitFor(() => expect(live.getAttribute("aria-pressed")).toBe("true"));
+    expect(fakes.getAttribute("aria-pressed")).toBe("false");
   });
 });

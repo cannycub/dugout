@@ -86,7 +86,7 @@ describe("KiroDraftAdapter.draft", () => {
     expect(captured.inv!.trustTools).not.toContain("write");
   });
 
-  it("lays the declared repos side-by-side under one source mount and never mutates the clones", async () => {
+  it("lays the declared repos side-by-side under one source mount; the adapter does not mutate the clones", async () => {
     const captured: { inv?: KiroInvocation } = {};
     const adapter = new KiroDraftAdapter({ workDir, runKiro: capturing(captured) });
 
@@ -101,7 +101,8 @@ describe("KiroDraftAdapter.draft", () => {
     // ...and the mount actually exposes each clone's real source content.
     expect(await readFile(join(sourceDir, "web", "code.ts"), "utf8")).toBe("// web source\n");
 
-    // Source not mutated: the developer's clones are byte-identical and gained no files.
+    // The adapter does not write to source: the clones are byte-identical and gained no files.
+    // (Preventing kiro itself from writing is the read-only tool-trust, asserted separately above.)
     expect(await readdir(join(clonesDir, "web"))).toEqual(["code.ts"]);
     expect(await readFile(join(clonesDir, "web", "code.ts"), "utf8")).toBe("// web source\n");
   });

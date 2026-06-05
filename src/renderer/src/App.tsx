@@ -11,6 +11,7 @@ import {
   PrBanner,
   TicketRoster,
   DeclareRepos,
+  ExecutorModeSelector,
 } from "./components.js";
 
 export function App() {
@@ -116,10 +117,7 @@ export function App() {
           <span className="wordmark">DUGOUT</span>
           <span className="tagline">the head coach's command post</span>
         </div>
-        <div className="mode">
-          <span className="mode-dot" />
-          LOCAL · FAKES
-        </div>
+        <ExecutorModeSelector />
       </header>
 
       <StatusRibbon story={story} />

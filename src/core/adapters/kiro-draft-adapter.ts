@@ -15,7 +15,12 @@ import type {
 export interface KiroInvocation {
   /** The fully re-assembled prompt (ticket + repos + methodology + prior clarifications). */
   prompt: string;
-  /** Read-only source mount: the declared repos laid out side-by-side. kiro's working dir. */
+  /**
+   * Source mount: the declared repos symlinked side-by-side; kiro's working dir. NOT
+   * filesystem-read-only — read-only is enforced by granting kiro only read/grep tool trust
+   * (see {@link trustTools}), never `write`. The symlink points at the real clone, so
+   * write-prevention is the trust boundary, not the mount itself.
+   */
   sourceDir: string;
   /** Writable dir kiro must write `result.json` (+ referenced spec markdown files) into. */
   specsDir: string;
@@ -52,11 +57,12 @@ type KiroResultFile =
   | { result: "needs-clarification"; questions: Array<{ id: string; prompt: string }> };
 
 /**
- * Real draft-mode executor adapter (#4, ADR-0007): headless kiro against read-only checkouts with
- * no sandbox (invariant 2). The adapter lays the declared repos side-by-side under a read-only
- * source mount beside a writable specs dir, re-assembles the prompt each call (kiro is one-shot),
- * runs kiro read-only, and parses the result it wrote into a {@link DraftOutcome}. The kiro
- * invocation is injected so the whole adapter is tested through the port with the CLI faked.
+ * Real draft-mode executor adapter (#4, ADR-0007): headless kiro, no sandbox (invariant 2). The
+ * adapter symlinks the declared repos side-by-side under a source mount beside a writable specs
+ * dir, re-assembles the prompt each call (kiro is one-shot), runs kiro with read-only tool trust
+ * (read/grep, never write — that trust, not the mount, is what keeps the clones unmutated), and
+ * parses the result it wrote into a {@link DraftOutcome}. The kiro invocation is injected so the
+ * whole adapter is tested through the port with the CLI faked.
  */
 export class KiroDraftAdapter implements ExecutorPort {
   constructor(private readonly config: KiroDraftConfig) {}
@@ -77,9 +83,10 @@ export class KiroDraftAdapter implements ExecutorPort {
   }
 
   /**
-   * Lay out a fresh per-ticket run dir: a read-only `source/` with each cloned declared repo
-   * linked in side-by-side (multi-repo layout), and an empty writable `specs/`. The source is
-   * linked, never copied into and never written, so the developer's clones are not mutated.
+   * Lay out a fresh per-ticket run dir: a `source/` with each cloned declared repo symlinked in
+   * side-by-side (multi-repo layout), and an empty writable `specs/`. The adapter itself never
+   * writes to `source/`; kiro is prevented from writing by being granted only read/grep tool
+   * trust (the symlinks are not filesystem-read-only — that trust is the boundary).
    */
   private async layout(input: DraftInput): Promise<{ sourceDir: string; specsDir: string }> {
     const runRoot = join(this.config.workDir, input.ticket.key);
@@ -207,4 +214,3 @@ function assemblePrompt(input: DraftInput, specsDir: string): string {
   }
   return lines.join("\n");
 }
-

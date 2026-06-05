@@ -3,6 +3,8 @@ import { FakeJira } from "../../core/fakes/fake-jira.js";
 import { FakeExecutor } from "../../core/fakes/fake-executor.js";
 import { FakeGitHub } from "../../core/fakes/fake-github.js";
 import { FakeEnvReplay } from "../../core/fakes/fake-env-replay.js";
+import { SwitchableExecutor } from "../../core/switchable-executor.js";
+import type { ExecutorPort } from "../../core/ports/executor.js";
 import type { RepoScope } from "../../core/repo-scope.js";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
@@ -34,9 +36,25 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     },
   };
 
+  // In-process path (tests / a future web build): there's no real kiro, so "live" drafting is
+  // unavailable — the mode still toggles (for the UI), but drafting live errors clearly.
+  const liveUnavailable: ExecutorPort = {
+    draft: async () => {
+      throw new Error("the live (kiro) executor is not available in local mode");
+    },
+    execute: async () => {
+      throw new Error("the live (kiro) executor is not available in local mode");
+    },
+  };
+  const executor = new SwitchableExecutor({
+    fake: new FakeExecutor({ draft: seed.draft }),
+    live: liveUnavailable,
+    mode: "fakes",
+  });
+
   const orchestrator = new Orchestrator({
     jira: new FakeJira({ tickets: seed.tickets }),
-    executor: new FakeExecutor({ draft: seed.draft }),
+    executor,
     github: new FakeGitHub(),
     metrics,
     envReplay: new FakeEnvReplay(),
@@ -90,6 +108,10 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
       const story = orchestrator.getStory(key);
       if (story) afterTransition(story);
       return prs;
+    },
+    getExecutorMode: async () => executor.getMode(),
+    setExecutorMode: async (mode) => {
+      executor.setMode(mode);
     },
     onEvent: (listener) => {
       listeners.add(listener);

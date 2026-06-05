@@ -5,7 +5,8 @@ import { Orchestrator } from "../core/orchestrator.js";
 import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
 import type { DeclaredRepo } from "../core/repo-scope.js";
-import { createOrchestrator, broadcast } from "./orchestrator-host.js";
+import type { ExecutorMode } from "../core/switchable-executor.js";
+import { createOrchestrator, broadcast, type ExecutorModeControl } from "./orchestrator-host.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,7 +40,7 @@ function createWindow(): void {
 }
 
 /** Register the IPC handlers that back the DugoutApi, broadcasting lifecycle transitions. */
-function registerIpc(orchestrator: Orchestrator): void {
+function registerIpc(orchestrator: Orchestrator, modeControl: ExecutorModeControl): void {
   const afterTransition = (storyKey: string, status: string) =>
     broadcast({ kind: "lifecycle", name: `story.${status}`, storyKey, status, at: Date.now() });
 
@@ -88,11 +89,14 @@ function registerIpc(orchestrator: Orchestrator): void {
     afterTransition(key, "pr-created");
     return prs;
   });
+
+  ipcMain.handle(CHANNELS.getExecutorMode, () => modeControl.get());
+  ipcMain.handle(CHANNELS.setExecutorMode, (_e, mode: ExecutorMode) => modeControl.set(mode));
 }
 
 app.whenReady().then(async () => {
-  const orchestrator = await createOrchestrator(app.getPath("userData"));
-  registerIpc(orchestrator);
+  const { orchestrator, modeControl } = await createOrchestrator(app.getPath("userData"));
+  registerIpc(orchestrator, modeControl);
   createWindow();
 
   app.on("activate", () => {
