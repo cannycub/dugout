@@ -18,15 +18,16 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   specs. Each spec restates the relevant acceptance criteria, defines a test-first test plan,
   and maps to exactly one repo → one branch → one PR → one CI run. Specs are **canonical as
   markdown in git**.
-- **Fan-out** — the decomposition of a story into its spec set, including order, the repo each
-  spec is assigned to (drawn from the story's declared repos), and which spec(s) are replay
-  specs. The agent proposes it; the developer corrects it at the approval gate. Reviewed first,
-  because it is the highest-leverage decision.
+- **Fan-out** — the decomposition of a story into its spec set, including order and the repo each
+  spec is assigned to (drawn from the story's declared repos). The agent proposes it; the developer
+  corrects it at the approval gate, where the developer also designates which spec(s) are replay
+  specs (the agent does not — ADR-0008). Reviewed first, because it is the highest-leverage decision.
 - **Replay** — data-pipeline reprocessing: a recorded input stream replayed through the entire
   stack, producing gigabytes of output queryable via AWS Athena. The team's primary testing
   method. Output is **human-verified**, never agent-graded.
-- **Replay spec** — a story-level spec whose verification is a replay. Default
-  `review-required`. In v1 the replay is triggered and verified manually outside Dugout.
+- **Replay spec** — a story-level spec whose verification is a replay. **Designated by the
+  developer at the approval gate** (ADR-0008), not the draft agent. Default `review-required`. In
+  v1 the replay is triggered and verified manually outside Dugout.
 - **Baseline replay** — one tagged replay run at story start, used as the comparison baseline
   (v1.5+).
 - **Draft mode** — executor invocation that reads ticket + code (read-only, **no sandbox**) and

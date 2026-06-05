@@ -23,15 +23,17 @@ describe("spec approval", () => {
     expect(story.specs.map((s) => s.status)).toEqual(["approved", "approved"]);
   });
 
-  it("defaults replay specs to review-required", async () => {
+  it("defaults a developer-designated replay spec to review-required", async () => {
+    // Replay specs are designated by the developer at the approval gate, not the agent (ADR-0008).
     const orchestrator = setup([
       { repo: "web", markdown: "# Spec A" },
-      { repo: "pipeline", markdown: "# Spec B (replay)", isReplaySpec: true },
+      { repo: "pipeline", markdown: "# Spec B" },
     ]);
     await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"].map(declared) });
 
-    const story = await orchestrator.approveStory("DUG-1", {});
+    const story = await orchestrator.approveStory("DUG-1", { replaySpecs: ["DUG-1-spec-2"] });
 
+    expect(story.specs.map((s) => s.isReplaySpec)).toEqual([false, true]);
     expect(story.specs.map((s) => s.reviewRequired)).toEqual([false, true]);
   });
 

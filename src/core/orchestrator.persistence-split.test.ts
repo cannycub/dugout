@@ -28,12 +28,16 @@ describe("persistence split (SpecStore vs RunStateStore)", () => {
     const { orchestrator, specStore } = makeHarness({
       draft: [
         { repo: "web", markdown: "# A" },
-        { repo: "pipeline", markdown: "# B", isReplaySpec: true },
+        { repo: "pipeline", markdown: "# B" },
       ],
     });
 
     await orchestrator.draftStory("DUG-1", { repos: ["web", "pipeline"].map(declared) });
-    await orchestrator.approveStory("DUG-1", { reviewRequired: ["DUG-1-spec-1"] });
+    // spec-1 marked review-required; spec-2 designated a replay spec (→ review-required by default).
+    await orchestrator.approveStory("DUG-1", {
+      reviewRequired: ["DUG-1-spec-1"],
+      replaySpecs: ["DUG-1-spec-2"],
+    });
 
     // The plan is part of the contract (canonical-in-git), not just run-state.
     const content = specStore.get("DUG-1");

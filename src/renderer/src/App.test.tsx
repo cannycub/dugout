@@ -57,7 +57,9 @@ describe("App — ticket selection (D1)", () => {
 describe("App — declare repos (D2)", () => {
   it("filters the catalog, surfaces clone status, and a not-cloned repo is still selectable", async () => {
     // A fan-out that targets the not-cloned repo we declare (ledger), so draft stays valid.
-    renderApp({ draft: { specs: [{ repo: "ledger", markdown: "# Backfill ledger totals (ledger)" }] } });
+    renderApp({
+      draft: { result: "drafted", specs: [{ repo: "ledger", markdown: "# Backfill ledger totals (ledger)" }] },
+    });
     fireEvent.click(await button(/Stream widget events/));
 
     // The catalog lists every repo with its clone-status badge.
@@ -86,17 +88,21 @@ describe("App — fake ticket through the full lifecycle, observable in the UI",
     // Pick the seed play off the roster.
     fireEvent.click(await button(/Stream widget events/));
 
-    // Declare the repos the seed story spans → the fan-out appears, including the replay spec.
+    // Declare the repos the seed story spans → the fan-out appears.
     fireEvent.click(await button(/widget-api/));
     fireEvent.click(await button(/pipeline/));
     fireEvent.click(await button(/declare 2 & draft/i));
-    expect(await screen.findByText("replay spec")).toBeTruthy();
+
+    // The developer marks the second spec review-required at pre-flight (the agent no longer
+    // designates replay specs — ADR-0008), so the run will stop after the first spec merges.
+    const reviewToggles = await screen.findAllByText("mark review-required");
+    fireEvent.click(reviewToggles[1]!);
 
     // Approve as a unit → the run call becomes available.
     fireEvent.click(await button(/approve spec set/i));
     const runBtn = await button(/run story/i);
 
-    // Run → stops at the review-required replay spec; the first spec is merged, the run paused.
+    // Run → stops at the review-required spec; the first spec is merged, the run paused.
     fireEvent.click(runBtn);
     const resumeBtn = await button(/resume after review/i);
     expect(await screen.findByText("Merged")).toBeTruthy();

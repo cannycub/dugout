@@ -1,5 +1,6 @@
 import type { Story, Spec, SpecContent, StorySpecs, StoryRunState, Preflight } from "./domain.js";
-import type { ExecutorPort } from "./ports/executor.js";
+import type { ExecutorPort, ClarifyingQuestion } from "./ports/executor.js";
+import { assertNever } from "./exhaustive.js";
 import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
 import type { MetricsPort, MetricEvent } from "./ports/metrics.js";
@@ -9,6 +10,17 @@ import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
 import { InMemorySpecStore } from "./store/in-memory-spec-store.js";
+
+/**
+ * Outcome of drafting a story (ADR-0007), surfaced to the caller (IPC/renderer). Mirrors the
+ * executor's {@link DraftOutcome}: only `drafted` yields a {@link Story}; the two stop outcomes
+ * carry the agent's reason/questions straight through. The deeper kickback lifecycle (Jira label,
+ * the answer→re-draft loop) is deferred — nothing is persisted for a stop outcome.
+ */
+export type DraftStoryResult =
+  | { outcome: "drafted"; story: Story }
+  | { outcome: "needs-info"; reason: string }
+  | { outcome: "needs-clarification"; questions: ClarifyingQuestion[] };
 
 /** The five ports orchestration depends on (CONTEXT.md). Adapters swap; orchestration does not. */
 export interface OrchestratorDeps {
@@ -79,47 +91,67 @@ export class Orchestrator {
     return assemble(content, run);
   }
 
-  /** Draft the fan-out for a selected ticket (read-only, no sandbox). */
-  async draftStory(ticketKey: string, opts: { repos: DeclaredRepo[] }): Promise<Story> {
+  /**
+   * Draft the fan-out for a selected ticket (read-only, no sandbox). Returns a discriminated
+   * {@link DraftStoryResult}: a `drafted` story, or one of the two "stop, don't guess" outcomes
+   * the agent can return (ADR-0007, invariant 1). Only `drafted` persists anything.
+   */
+  async draftStory(ticketKey: string, opts: { repos: DeclaredRepo[] }): Promise<DraftStoryResult> {
     const tickets = await this.deps.jira.listAssignedTickets();
     const ticket = tickets.find((t) => t.key === ticketKey);
     if (!ticket) {
       throw new Error(`Ticket ${ticketKey} is not assigned to this developer`);
     }
 
-    const result = await this.deps.executor.draft({ ticket, repos: opts.repos });
+    const outcome = await this.deps.executor.draft({ ticket, repos: opts.repos });
 
-    // The fan-out invariant (ADR-0006): every drafted spec must target a declared repo. A spec
-    // for an undeclared repo would have no clone binding at execute time — reject it now.
-    const declaredNames = new Set(opts.repos.map((r) => r.identity.name));
-    for (const drafted of result.specs) {
-      if (!declaredNames.has(drafted.repo)) {
-        throw new Error(
-          `Drafted spec targets undeclared repo "${drafted.repo}" (declared: ${[...declaredNames].join(", ") || "none"})`,
-        );
+    switch (outcome.result) {
+      case "needs-info":
+        // Terminal kickback: the ticket is too thin to spec. Nothing drafted, nothing persisted —
+        // the developer enriches the ticket out of band (deeper lifecycle is a follow-up).
+        return { outcome: "needs-info", reason: outcome.reason };
+
+      case "needs-clarification":
+        // The agent can spec but needs answers first; surface the questions for a re-draft.
+        return { outcome: "needs-clarification", questions: outcome.questions };
+
+      case "drafted": {
+        // The fan-out invariant (ADR-0006): every drafted spec must target a declared repo. A spec
+        // for an undeclared repo would have no clone binding at execute time — reject it now.
+        const declaredNames = new Set(opts.repos.map((r) => r.identity.name));
+        for (const drafted of outcome.specs) {
+          if (!declaredNames.has(drafted.repo)) {
+            throw new Error(
+              `Drafted spec targets undeclared repo "${drafted.repo}" (declared: ${[...declaredNames].join(", ") || "none"})`,
+            );
+          }
+        }
+
+        const specs: Spec[] = outcome.specs.map((drafted, order) => ({
+          id: `${ticket.key}-spec-${order + 1}`,
+          repo: drafted.repo,
+          markdown: drafted.markdown,
+          status: "drafted",
+          isReplaySpec: false, // the developer designates replay specs at the gate (ADR-0008)
+          reviewRequired: false, // finalized at pre-flight (approveStory)
+          order,
+        }));
+
+        const story: Story = {
+          key: ticket.key,
+          title: ticket.title,
+          status: "drafted",
+          specs,
+          declaredRepos: opts.repos.map((r) => r.identity.name),
+        };
+        this.persistContent(story);
+        this.persistRun(story);
+        return { outcome: "drafted", story };
       }
+
+      default:
+        return assertNever(outcome, "draftStory: unhandled draft outcome");
     }
-
-    const specs: Spec[] = result.specs.map((drafted, order) => ({
-      id: `${ticket.key}-spec-${order + 1}`,
-      repo: drafted.repo,
-      markdown: drafted.markdown,
-      status: "drafted",
-      isReplaySpec: drafted.isReplaySpec ?? false,
-      reviewRequired: false, // finalized at pre-flight (approveStory)
-      order,
-    }));
-
-    const story: Story = {
-      key: ticket.key,
-      title: ticket.title,
-      status: "drafted",
-      specs,
-      declaredRepos: opts.repos.map((r) => r.identity.name),
-    };
-    this.persistContent(story);
-    this.persistRun(story);
-    return story;
   }
 
   /**
@@ -132,14 +164,17 @@ export class Orchestrator {
       throw new Error(`Story ${storyKey} is ${story.status}, cannot approve (expected drafted)`);
     }
 
+    const markedReplay = new Set(preflight.replaySpecs ?? []);
     const markedReviewRequired = new Set(preflight.reviewRequired ?? []);
     for (const spec of story.specs) {
-      // Replay specs default on; the developer may mark additional specs at pre-flight.
+      // The developer designates replay specs at the gate (ADR-0008); they default review-required,
+      // and the developer may mark additional specs review-required on top.
+      spec.isReplaySpec = markedReplay.has(spec.id);
       spec.reviewRequired = spec.isReplaySpec || markedReviewRequired.has(spec.id);
       spec.status = "approved";
     }
     story.status = "approved";
-    // The approved plan (reviewRequired) is part of the canonical contract — persist content too.
+    // The approved plan (replay + reviewRequired) is part of the canonical contract — persist it too.
     this.persistContent(story);
     this.persistRun(story);
     return story;

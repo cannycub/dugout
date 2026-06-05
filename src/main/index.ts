@@ -48,9 +48,10 @@ function registerIpc(orchestrator: Orchestrator): void {
   ipcMain.handle(CHANNELS.getStory, (_e, key: string) => orchestrator.getStory(key) ?? null);
 
   ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: DeclaredRepo[]) => {
-    const story = await orchestrator.draftStory(key, { repos });
-    afterTransition(key, story.status);
-    return story;
+    const result = await orchestrator.draftStory(key, { repos });
+    // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
+    if (result.outcome === "drafted") afterTransition(key, result.story.status);
+    return result;
   });
 
   ipcMain.handle(CHANNELS.searchRepos, (_e, query: string) => orchestrator.searchRepos(query));

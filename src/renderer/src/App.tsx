@@ -77,7 +77,18 @@ export function App() {
     guard(async () => {
       // Bind the chosen names server-side (authoritative, fresh), then draft the fan-out.
       const repos = await dugout.declareRepos(names);
-      setStory(await dugout.draft(key, repos));
+      const result = await dugout.draft(key, repos);
+      // The agent can stop rather than guess (ADR-0007). Until the kickback UI lands, surface the
+      // stop through the existing error banner so a thin ticket is never silently dropped.
+      if (result.outcome === "drafted") {
+        setStory(result.story);
+      } else if (result.outcome === "needs-info") {
+        setError(`Ticket needs more info: ${result.reason}`);
+      } else {
+        setError(
+          `Agent needs clarification:\n${result.questions.map((q) => `• ${q.prompt}`).join("\n")}`,
+        );
+      }
     });
   const onApprove = () =>
     guard(async () => setStory(await dugout.approve(key, { reviewRequired: [...reviewSel] })));

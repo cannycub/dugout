@@ -6,14 +6,14 @@ import { FakeEnvReplay } from "../../core/fakes/fake-env-replay.js";
 import type { RepoScope } from "../../core/repo-scope.js";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
-import type { DraftResult } from "../../core/ports/executor.js";
+import type { DraftOutcome } from "../../core/ports/executor.js";
 import type { MetricsPort, MetricEvent } from "../../core/ports/metrics.js";
 import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
 
 export interface LocalSeed {
   /** The developer's assigned tickets (their roster). */
   tickets: Ticket[];
-  draft: DraftResult;
+  draft: DraftOutcome;
   /** Catalog + clone discovery backing the declare-repos step (ADR-0006). */
   repoScope: RepoScope;
 }
@@ -56,9 +56,10 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     listTickets: () => orchestrator.listAssignedTickets(),
     getStory: async (key) => orchestrator.getStory(key) ?? null,
     draft: async (key, repos) => {
-      const story = await orchestrator.draftStory(key, { repos });
-      afterTransition(story);
-      return story;
+      const result = await orchestrator.draftStory(key, { repos });
+      // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
+      if (result.outcome === "drafted") afterTransition(result.story);
+      return result;
     },
     searchRepos: (query) => orchestrator.searchRepos(query),
     declareRepos: (names) => orchestrator.declareRepos(names),

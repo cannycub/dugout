@@ -22,12 +22,16 @@ test("fake ticket flows select → declare → draft → approve → run → rev
   await win.getByRole("button", { name: /widget-api/ }).click();
   await win.getByRole("button", { name: /pipeline/ }).click();
   await win.getByRole("button", { name: /declare 2 & draft/i }).click();
-  await expect(win.getByText("replay spec", { exact: true })).toBeVisible();
+
+  // The developer marks the second spec review-required at pre-flight (the agent no longer
+  // designates replay specs — ADR-0008), so the run stops after the first spec merges.
+  await expect(win.getByText("mark review-required").first()).toBeVisible();
+  await win.getByRole("checkbox").nth(1).click();
 
   await win.getByRole("button", { name: /approve spec set/i }).click();
   await win.getByRole("button", { name: /run story/i }).click();
 
-  // Stops at the review-required replay spec; first spec merged.
+  // Stops at the review-required spec; first spec merged.
   await expect(win.getByRole("button", { name: /resume after review/i })).toBeVisible();
   await expect(win.getByText("Merged").first()).toBeVisible();
 

@@ -20,7 +20,9 @@ describe("best-effort side-effects", () => {
       jira: new FakeJira({
         tickets: [{ key: "DUG-1", title: "Add widget", description: "AC" }],
       }),
-      executor: new FakeExecutor({ draft: { specs: [{ repo: "web", markdown: "# A" }] } }),
+      executor: new FakeExecutor({
+        draft: { result: "drafted", specs: [{ repo: "web", markdown: "# A" }] },
+      }),
       github: new FakeGitHub(),
       metrics: throwingMetrics,
       envReplay: new FakeEnvReplay(),
