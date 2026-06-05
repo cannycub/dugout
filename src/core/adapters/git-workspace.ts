@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -43,13 +43,19 @@ export class GitWorkspace implements WorkspacePort {
     return clones;
   }
 
-  /** Returns the origin URL, "" for a git repo with no origin, or null if not a git repo. */
+  /**
+   * Returns the origin URL, "" for a git repo with no origin, or null if `path` is not a git
+   * repo ROOT. `git rev-parse` ascends the tree, so a workspace root that lives inside a repo
+   * would otherwise bind every plain subdir to the enclosing repo; we require `path` to be the
+   * repo's own top-level work tree.
+   */
   private async readOrigin(path: string): Promise<string | null> {
     try {
-      const { stdout } = await run("git", ["-C", path, "rev-parse", "--is-inside-work-tree"]);
-      if (stdout.trim() !== "true") return null;
+      const { stdout } = await run("git", ["-C", path, "rev-parse", "--show-toplevel"]);
+      const [toplevel, here] = await Promise.all([realpath(stdout.trim()), realpath(path)]);
+      if (toplevel !== here) return null; // inside a repo, but not this dir's own root
     } catch {
-      return null;
+      return null; // not a git work tree
     }
     try {
       const { stdout } = await run("git", ["-C", path, "remote", "get-url", "origin"]);

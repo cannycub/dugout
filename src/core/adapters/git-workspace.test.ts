@@ -36,4 +36,20 @@ describe("GitWorkspace.discover", () => {
   it("returns the configured roots", async () => {
     expect(await new GitWorkspace({ roots: [root] }).listRoots()).toEqual([root]);
   });
+
+  it("does not mis-detect plain subdirs as clones when the root is itself inside a git repo", async () => {
+    // If the workspace root lives inside a repo (e.g. ~/work under a dotfiles repo), git ascends
+    // the tree, so a naive is-inside-work-tree check would bind every plain subdir to the
+    // enclosing repo's origin. Only a directory that is its OWN repo root is a clone.
+    const parent = await mkdtemp(join(tmpdir(), "dugout-parent-"));
+    await run("git", ["init", "-q"], { cwd: parent });
+    await run("git", ["remote", "add", "origin", "git@github.com:acme/parent.git"], { cwd: parent });
+    await mkdir(join(parent, "plain-child")); // a plain dir, not its own repo
+    try {
+      const clones = await new GitWorkspace({ roots: [parent] }).discover([parent]);
+      expect(clones.some((c) => c.path.endsWith("plain-child"))).toBe(false);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
 });
