@@ -48,9 +48,9 @@ export function App() {
   }, [dugout, selectedKey]);
 
   const selectedTicket = tickets.find((t) => t.key === selectedKey) ?? null;
-  const repoNames = story
-    ? [...new Set(story.specs.map((s) => s.repo))]
-    : [];
+  // The story's scope is what the developer declared — not re-derived from the specs the fan-out
+  // produced (a declared repo may have no spec). declaredRepos is the source of truth.
+  const repoNames = story ? story.declaredRepos : [];
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);

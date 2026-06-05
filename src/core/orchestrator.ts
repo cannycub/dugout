@@ -110,7 +110,13 @@ export class Orchestrator {
       order,
     }));
 
-    const story: Story = { key: ticket.key, title: ticket.title, status: "drafted", specs };
+    const story: Story = {
+      key: ticket.key,
+      title: ticket.title,
+      status: "drafted",
+      specs,
+      declaredRepos: opts.repos.map((r) => r.identity.name),
+    };
     this.persistContent(story);
     this.persistRun(story);
     return story;
@@ -314,6 +320,7 @@ export class Orchestrator {
       title: story.title,
       status: story.status,
       specs: story.specs.map((s) => ({ specId: s.id, status: s.status })),
+      declaredRepos: story.declaredRepos,
     };
     this.runState.save(state);
   }
@@ -326,7 +333,7 @@ function assemble(content: StorySpecs, run: StoryRunState): Story {
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((c) => ({ ...c, status: statusById.get(c.id) ?? "drafted" }));
-  return { key: content.key, title: run.title, status: run.status, specs };
+  return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
 }
 
 /** Fully-linked PR body: story id + the specs (and their AC) that landed in this repo. */

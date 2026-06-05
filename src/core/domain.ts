@@ -82,6 +82,12 @@ export interface Story {
   status: StoryStatus;
   /** The fan-out: ordered single-repo specs. */
   specs: Spec[];
+  /**
+   * The repo names the developer declared in scope — the source of truth for the story's scope,
+   * which is NOT the same as the repos the fan-out happened to assign specs to (a declared repo
+   * may get no spec). Rebuildable run-state (names re-resolve against the catalog), not contract.
+   */
+  declaredRepos: string[];
 }
 
 /** Run-state for one spec: just its lifecycle position (ephemeral, rebuildable). */
@@ -96,4 +102,6 @@ export interface StoryRunState {
   title: string;
   status: StoryStatus;
   specs: SpecRunState[];
+  /** Declared scope (repo names) — rebuildable run-state, see {@link Story.declaredRepos}. */
+  declaredRepos: string[];
 }

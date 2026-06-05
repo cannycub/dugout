@@ -24,6 +24,19 @@ describe("draft mode", () => {
     expect(spec.markdown).toContain("Add widget endpoint");
   });
 
+  it("persists the declared repos as story scope, including a declared repo with no spec", async () => {
+    const { orchestrator } = makeHarness({
+      tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
+      // The fan-out only assigns a spec to web; infra is declared but gets none (still in scope).
+      draft: [{ repo: "web", markdown: "# Spec (web)" }],
+    });
+
+    await orchestrator.draftStory("DUG-1", { repos: ["web", "infra"].map(declared) });
+
+    const story = orchestrator.getStory("DUG-1")!;
+    expect(story.declaredRepos).toEqual(["web", "infra"]);
+  });
+
   it("rejects a fan-out that drafts a spec for an undeclared repo (ADR-0006)", async () => {
     const { orchestrator } = makeHarness({
       tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
