@@ -7,7 +7,7 @@
 import type { Story, Preflight } from "../core/domain.js";
 import type { Ticket } from "../core/ports/jira.js";
 import type { PullRequest } from "../core/ports/github.js";
-import type { DeclaredRepo } from "../core/repo-scope.js";
+import type { DeclaredRepo, RepoMatch } from "../core/repo-scope.js";
 
 /** A streamed telemetry event (metric emit or lifecycle transition) shown in the UI log. */
 export type DugoutEvent =
@@ -19,6 +19,9 @@ export const CHANNELS = {
   listTickets: "dugout:listTickets",
   getStory: "dugout:getStory",
   draft: "dugout:draft",
+  searchRepos: "dugout:searchRepos",
+  rescanRepos: "dugout:rescanRepos",
+  listWorkspaceRoots: "dugout:listWorkspaceRoots",
   approve: "dugout:approve",
   run: "dugout:run",
   resume: "dugout:resume",
@@ -32,6 +35,12 @@ export interface DugoutApi {
   listTickets(): Promise<Ticket[]>;
   getStory(storyKey: string): Promise<Story | null>;
   draft(storyKey: string, repos: DeclaredRepo[]): Promise<Story>;
+  /** Search the catalog; each match carries its clone binding. v1: local filter. */
+  searchRepos(query: string): Promise<RepoMatch[]>;
+  /** Re-scan workspace roots (after the dev clones something mid-flight). */
+  rescanRepos(): Promise<void>;
+  /** The developer's configured workspace roots (for display). */
+  listWorkspaceRoots(): Promise<string[]>;
   approve(storyKey: string, preflight: Preflight): Promise<Story>;
   run(storyKey: string): Promise<Story>;
   resume(storyKey: string): Promise<Story>;

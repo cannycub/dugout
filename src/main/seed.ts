@@ -1,5 +1,6 @@
 import type { Ticket } from "../core/ports/jira.js";
 import type { DraftResult } from "../core/ports/executor.js";
+import type { RepoIdentity } from "../core/ports/catalog.js";
 
 /** The single hardcoded ticket the walking skeleton flows end-to-end (#2). */
 export const SEED_TICKET: Ticket = {
@@ -9,6 +10,13 @@ export const SEED_TICKET: Ticket = {
     "AC: widget mutations emit domain events; the pipeline ingests and reprocesses them; a " +
     "query endpoint returns the aggregated widget timeline. Must survive a replay run.",
 };
+
+/** Seed catalog the walking skeleton declares from until the real GitHub-org list lands (#3). */
+export const SEED_CATALOG: RepoIdentity[] = [
+  { name: "widget-api", remote: "git@github.com:acme/widget-api.git" },
+  { name: "pipeline", remote: "git@github.com:acme/pipeline.git" },
+  { name: "ledger", remote: "git@github.com:acme/ledger.git" },
+];
 
 /**
  * Canned fan-out the fake executor returns for the seed ticket: three single-repo specs across

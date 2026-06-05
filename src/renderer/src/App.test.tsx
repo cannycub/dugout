@@ -4,12 +4,29 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { App } from "./App.js";
 import { DugoutProvider } from "./dugout-context.js";
 import { createLocalDugoutApi } from "./local-dugout-api.js";
-import { SEED_TICKET, SEED_DRAFT } from "../../main/seed.js";
+import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "../../main/seed.js";
+import { RepoScope } from "../../core/repo-scope.js";
+import { FakeCatalog } from "../../core/fakes/fake-catalog.js";
+import { FakeWorkspace } from "../../core/fakes/fake-workspace.js";
 
 afterEach(cleanup);
 
+function seedRepoScope() {
+  return new RepoScope(
+    new FakeCatalog(SEED_CATALOG),
+    new FakeWorkspace({
+      roots: ["/ws"],
+      clones: [{ path: "/ws/widget-api", originRemote: "git@github.com:acme/widget-api.git" }],
+    }),
+  );
+}
+
 function renderApp() {
-  const api = createLocalDugoutApi({ ticket: SEED_TICKET, draft: SEED_DRAFT });
+  const api = createLocalDugoutApi({
+    ticket: SEED_TICKET,
+    draft: SEED_DRAFT,
+    repoScope: seedRepoScope(),
+  });
   render(
     <DugoutProvider api={api}>
       <App />

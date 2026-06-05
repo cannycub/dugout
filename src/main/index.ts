@@ -53,6 +53,10 @@ function registerIpc(orchestrator: Orchestrator): void {
     return story;
   });
 
+  ipcMain.handle(CHANNELS.searchRepos, (_e, query: string) => orchestrator.searchRepos(query));
+  ipcMain.handle(CHANNELS.rescanRepos, () => orchestrator.rescanRepos());
+  ipcMain.handle(CHANNELS.listWorkspaceRoots, () => orchestrator.listWorkspaceRoots());
+
   ipcMain.handle(CHANNELS.approve, async (_e, key: string, preflight: Preflight) => {
     const story = await orchestrator.approveStory(key, preflight);
     afterTransition(key, story.status);

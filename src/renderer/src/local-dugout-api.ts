@@ -3,6 +3,7 @@ import { FakeJira } from "../../core/fakes/fake-jira.js";
 import { FakeExecutor } from "../../core/fakes/fake-executor.js";
 import { FakeGitHub } from "../../core/fakes/fake-github.js";
 import { FakeEnvReplay } from "../../core/fakes/fake-env-replay.js";
+import type { RepoScope } from "../../core/repo-scope.js";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { DraftResult } from "../../core/ports/executor.js";
@@ -12,6 +13,8 @@ import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
 export interface LocalSeed {
   ticket: Ticket;
   draft: DraftResult;
+  /** Catalog + clone discovery backing the declare-repos step (ADR-0006). */
+  repoScope: RepoScope;
 }
 
 /**
@@ -36,6 +39,7 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     github: new FakeGitHub(),
     metrics,
     envReplay: new FakeEnvReplay(),
+    repoScope: seed.repoScope,
   });
 
   const afterTransition = (story: Story) =>
@@ -55,6 +59,9 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
       afterTransition(story);
       return story;
     },
+    searchRepos: (query) => orchestrator.searchRepos(query),
+    rescanRepos: () => orchestrator.rescanRepos(),
+    listWorkspaceRoots: () => orchestrator.listWorkspaceRoots(),
     approve: async (key, preflight) => {
       const story = await orchestrator.approveStory(key, preflight);
       afterTransition(story);
