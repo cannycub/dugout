@@ -36,54 +36,104 @@ async function declaredClone(name: string): Promise<DeclaredRepo> {
   };
 }
 
-/** A fake kiro that writes a drafted result (one spec markdown file + manifest) into the specs dir. */
-function draftsOneSpec(repo: string, markdown: string): KiroRun {
-  return async ({ specsDir }: KiroInvocation) => {
-    await writeFile(join(specsDir, `${repo}.spec.md`), markdown);
-    await writeFile(
-      join(specsDir, "result.json"),
-      JSON.stringify({
-        result: "drafted",
-        specs: [{ repo, markdownFile: `${repo}.spec.md` }],
-      }),
-    );
-  };
-}
+/** A fake kiro that prints one drafted spec inside the DUGOUT block (markdown verbatim, no escaping). */
+const drafts = (repo: string, markdown: string): KiroRun =>
+  async () =>
+    `===DUGOUT BEGIN===\nRESULT: drafted\n===SPEC ${repo}===\n${markdown}\n===DUGOUT END===`;
 
-/** Captures the invocation kiro was run with, then writes a trivial drafted result so draft() resolves. */
+/** Captures the invocation, then prints a trivial drafted block so draft() resolves. */
 function capturing(captured: { inv?: KiroInvocation }): KiroRun {
   return async (inv: KiroInvocation) => {
     captured.inv = inv;
-    await writeFile(join(inv.specsDir, "web.spec.md"), "# Spec (web)");
-    await writeFile(
-      join(inv.specsDir, "result.json"),
-      JSON.stringify({ result: "drafted", specs: [{ repo: "web", markdownFile: "web.spec.md" }] }),
-    );
+    return "===DUGOUT BEGIN===\nRESULT: drafted\n===SPEC web===\n# Spec (web)\n===DUGOUT END===";
   };
 }
 
 describe("KiroDraftAdapter.draft", () => {
-  it("returns a drafted fan-out parsed from the result kiro wrote into the specs dir", async () => {
+  it("returns a drafted fan-out parsed from the DUGOUT block kiro prints on stdout", async () => {
     const markdown = "# Spec: Add widget endpoint (web)\n\n## AC\n- [ ] returns 200";
-    const adapter = new KiroDraftAdapter({ workDir, runKiro: draftsOneSpec("web", markdown) });
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: drafts("web", markdown) });
 
     const outcome = await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
 
+    expect(outcome).toEqual({ result: "drafted", specs: [{ repo: "web", markdown }] });
+  });
+
+  it("splits a multi-repo fan-out on its ===SPEC <repo>=== headers, markdown verbatim", async () => {
+    const stdout = [
+      "===DUGOUT BEGIN===",
+      "RESULT: drafted",
+      "===SPEC web===",
+      "# Spec (web)",
+      "- [ ] returns 200",
+      "===SPEC infra===",
+      "# Spec (infra)",
+      'resource "db" { engine = "pg" }',
+      "===DUGOUT END===",
+    ].join("\n");
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: async () => stdout });
+
+    const outcome = await adapter.draft({
+      ticket: TICKET,
+      repos: [await declaredClone("web"), await declaredClone("infra")],
+    });
+
     expect(outcome).toEqual({
       result: "drafted",
-      specs: [{ repo: "web", markdown }],
+      specs: [
+        { repo: "web", markdown: "# Spec (web)\n- [ ] returns 200" },
+        { repo: "infra", markdown: '# Spec (infra)\nresource "db" { engine = "pg" }' },
+      ],
     });
   });
 
-  it("runs kiro read-only — trusting read/grep tools but never write (invariant 2)", async () => {
+  it("ignores kiro's tool-activity narration surrounding the DUGOUT block", async () => {
+    // --no-interactive streams the read/grep tool log to stdout; the sentinel block is how we skip it.
+    const stdout = [
+      "Reading directory: /work/source ✓ Successfully read 3 entries",
+      "Reading file: web/code.ts ✓",
+      "===DUGOUT BEGIN===",
+      "RESULT: drafted",
+      "===SPEC web===",
+      "# Spec",
+      "===DUGOUT END===",
+      "Done. (used 1,234 tokens)",
+    ].join("\n");
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: async () => stdout });
+
+    const outcome = await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
+
+    expect(outcome).toEqual({ result: "drafted", specs: [{ repo: "web", markdown: "# Spec" }] });
+  });
+
+  it("takes the LAST DUGOUT block when kiro emits more than one", async () => {
+    const stdout = [
+      "===DUGOUT BEGIN===",
+      "RESULT: needs-info",
+      "first thoughts, superseded",
+      "===DUGOUT END===",
+      "on reflection...",
+      "===DUGOUT BEGIN===",
+      "RESULT: drafted",
+      "===SPEC web===",
+      "# Final spec",
+      "===DUGOUT END===",
+    ].join("\n");
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: async () => stdout });
+
+    const outcome = await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
+
+    expect(outcome).toEqual({ result: "drafted", specs: [{ repo: "web", markdown: "# Final spec" }] });
+  });
+
+  it("runs kiro read-only — trusting fs_read but never a write tool (invariant 2)", async () => {
     const captured: { inv?: KiroInvocation } = {};
     const adapter = new KiroDraftAdapter({ workDir, runKiro: capturing(captured) });
 
     await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
 
-    expect(captured.inv!.trustTools).toContain("read");
-    expect(captured.inv!.trustTools).toContain("grep");
-    expect(captured.inv!.trustTools).not.toContain("write");
+    expect(captured.inv!.trustTools).toContain("fs_read");
+    expect(captured.inv!.trustTools).not.toContain("fs_write");
   });
 
   it("lays the declared repos side-by-side under one source mount; the adapter does not mutate the clones", async () => {
@@ -102,18 +152,14 @@ describe("KiroDraftAdapter.draft", () => {
     expect(await readFile(join(sourceDir, "web", "code.ts"), "utf8")).toBe("// web source\n");
 
     // The adapter does not write to source: the clones are byte-identical and gained no files.
-    // (Preventing kiro itself from writing is the read-only tool-trust, asserted separately above.)
+    // (kiro itself has no write trust at all, so it cannot mutate them either.)
     expect(await readdir(join(clonesDir, "web"))).toEqual(["code.ts"]);
     expect(await readFile(join(clonesDir, "web", "code.ts"), "utf8")).toBe("// web source\n");
   });
 
-  it("parses a needs-info kickback the agent wrote when the ticket is too thin to spec", async () => {
-    const runKiro: KiroRun = async ({ specsDir }) => {
-      await writeFile(
-        join(specsDir, "result.json"),
-        JSON.stringify({ result: "needs-info", reason: "No acceptance criteria to spec against." }),
-      );
-    };
+  it("parses a needs-info kickback (block body is the reason) when the ticket is too thin to spec", async () => {
+    const runKiro: KiroRun = async () =>
+      "===DUGOUT BEGIN===\nRESULT: needs-info\nNo acceptance criteria to spec against.\n===DUGOUT END===";
     const adapter = new KiroDraftAdapter({ workDir, runKiro });
 
     const outcome = await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
@@ -124,23 +170,25 @@ describe("KiroDraftAdapter.draft", () => {
     });
   });
 
-  it("parses needs-clarification questions the agent wrote before it would draft", async () => {
-    const runKiro: KiroRun = async ({ specsDir }) => {
-      await writeFile(
-        join(specsDir, "result.json"),
-        JSON.stringify({
-          result: "needs-clarification",
-          questions: [{ id: "q1", prompt: "Soft-delete or hard-delete?" }],
-        }),
-      );
-    };
+  it("parses needs-clarification questions, assigning ids by line order (the agent supplies none)", async () => {
+    const runKiro: KiroRun = async () =>
+      [
+        "===DUGOUT BEGIN===",
+        "RESULT: needs-clarification",
+        "Soft-delete or hard-delete?",
+        "Is pagination required?",
+        "===DUGOUT END===",
+      ].join("\n");
     const adapter = new KiroDraftAdapter({ workDir, runKiro });
 
     const outcome = await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
 
     expect(outcome).toEqual({
       result: "needs-clarification",
-      questions: [{ id: "q1", prompt: "Soft-delete or hard-delete?" }],
+      questions: [
+        { id: "q1", prompt: "Soft-delete or hard-delete?" },
+        { id: "q2", prompt: "Is pagination required?" },
+      ],
     });
   });
 
@@ -160,68 +208,51 @@ describe("KiroDraftAdapter.draft", () => {
       ],
     });
 
-    // kiro has no session memory; the answer must be folded back into this call's prompt.
     expect(captured.inv!.prompt).toContain("Soft-delete or hard-delete?");
     expect(captured.inv!.prompt).toContain("Soft-delete only");
   });
 
-  it("carries the methodology + the machine output contract kiro must follow", async () => {
-    // The prompt PROSE (how to draft) is iterated in draft-methodology.ts and intentionally not
-    // pinned here — only the machine contract kiro must satisfy is asserted, so rewording is free.
+  it("carries the methodology + the delimited DUGOUT output contract kiro must follow", async () => {
     const captured: { inv?: KiroInvocation } = {};
     const adapter = new KiroDraftAdapter({ workDir, runKiro: capturing(captured) });
 
     await adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] });
     const prompt = captured.inv!.prompt;
 
-    // The three result outcomes kiro may emit, and the file it writes them to...
+    // The three result kinds kiro may emit, and the sentinel-delimited block it must wrap them in.
     expect(prompt).toContain("drafted");
     expect(prompt).toContain("needs-info");
     expect(prompt).toContain("needs-clarification");
-    expect(prompt).toContain("result.json");
-    // ...into the actual writable specs directory (the one-shot agent is told the real path).
-    expect(prompt).toContain(captured.inv!.specsDir);
+    expect(prompt).toContain("===DUGOUT BEGIN===");
+    expect(prompt).toContain("===DUGOUT END===");
   });
 
-  // The manifest is written by a one-shot LLM agent — untrusted output. The adapter must fail
-  // loudly and clearly rather than leak a raw parse/IO crash or read an out-of-tree file.
-
-  it("rejects a malformed result.json with a clear error", async () => {
-    const runKiro: KiroRun = async ({ specsDir }) => {
-      await writeFile(join(specsDir, "result.json"), "{ not: valid json");
-    };
+  it("rejects stdout with no DUGOUT block, surfacing a snippet for prompt tuning", async () => {
+    const runKiro: KiroRun = async () => "I'd be happy to help! Here are some specs...";
     const adapter = new KiroDraftAdapter({ workDir, runKiro });
 
     await expect(
       adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] }),
-    ).rejects.toThrow(/kiro/i);
+    ).rejects.toThrow(/DUGOUT/);
   });
 
-  it("rejects a drafted manifest whose specs are missing or malformed", async () => {
-    const runKiro: KiroRun = async ({ specsDir }) => {
-      await writeFile(join(specsDir, "result.json"), JSON.stringify({ result: "drafted" }));
-    };
+  it("rejects an unknown RESULT rather than silently accepting it (fail-safe: the dev re-runs)", async () => {
+    const runKiro: KiroRun = async () =>
+      "===DUGOUT BEGIN===\nRESULT: maybe-later\nhmm\n===DUGOUT END===";
     const adapter = new KiroDraftAdapter({ workDir, runKiro });
 
     await expect(
       adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] }),
-    ).rejects.toThrow(/kiro/i);
+    ).rejects.toThrow(/RESULT/i);
   });
 
-  it("rejects a spec markdownFile that escapes the specs directory (path traversal)", async () => {
-    const runKiro: KiroRun = async ({ specsDir }) => {
-      await writeFile(
-        join(specsDir, "result.json"),
-        JSON.stringify({
-          result: "drafted",
-          specs: [{ repo: "web", markdownFile: "../../../../etc/hosts" }],
-        }),
-      );
-    };
+  it("rejects a drafted block that emitted no ===SPEC <repo>=== sections", async () => {
+    const runKiro: KiroRun = async () =>
+      "===DUGOUT BEGIN===\nRESULT: drafted\n(forgot the specs)\n===DUGOUT END===";
     const adapter = new KiroDraftAdapter({ workDir, runKiro });
 
     await expect(
       adapter.draft({ ticket: TICKET, repos: [await declaredClone("web")] }),
-    ).rejects.toThrow(/markdownFile/i);
+    ).rejects.toThrow(/spec/i);
   });
 });

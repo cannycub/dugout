@@ -1,11 +1,10 @@
-import { mkdir, rm, symlink, readFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
-import { assertNever } from "../exhaustive.js";
+import { mkdir, rm, symlink } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { draftMethodology } from "./draft-methodology.js";
 import type {
+  DraftedSpec,
   DraftInput,
   DraftOutcome,
-  DraftedSpec,
   ExecuteInput,
   ExecuteOutcome,
   ExecutorPort,
@@ -16,29 +15,29 @@ export interface KiroInvocation {
   /** The fully re-assembled prompt (ticket + repos + methodology + prior clarifications). */
   prompt: string;
   /**
-   * Source mount: the declared repos symlinked side-by-side; kiro's working dir. NOT
-   * filesystem-read-only — read-only is enforced by granting kiro only read/grep tool trust
-   * (see {@link trustTools}), never `write`. The symlink points at the real clone, so
-   * write-prevention is the trust boundary, not the mount itself.
+   * Source mount: the declared repos symlinked side-by-side; kiro's working dir. kiro is granted
+   * only read/grep tool trust ({@link trustTools}), never `write`, so it cannot write anywhere —
+   * not the source, not anything. That total absence of write capability is what keeps the
+   * developer's clones unmutated; the result comes back on stdout, never via a written file.
    */
   sourceDir: string;
-  /** Writable dir kiro must write `result.json` (+ referenced spec markdown files) into. */
-  specsDir: string;
   /** Tool categories kiro may auto-approve. Draft mode is read-only — never includes `write`. */
   trustTools: readonly string[];
 }
 
 /**
- * The injected seam: run headless kiro for one invocation. Tests pass a fake; no real kiro runs in
- * tests. The real binding shells out read-only — roughly:
- *   kiro-cli chat --no-interactive --trust-tools=read,grep <prompt>   (cwd = sourceDir)
- * mapping {@link KiroInvocation.trustTools} to `--trust-tools` and never trusting `write`
- * (kiro.dev/docs/cli/headless/). It is not wired here — left to verify end-to-end against real kiro.
+ * The injected seam: run headless kiro for one invocation and return its (ANSI-stripped) stdout.
+ * Tests pass a fake; no real kiro runs in tests. The real binding shells out read-only —
+ *   kiro-cli chat --no-interactive --wrap never --trust-tools=fs_read <prompt>   (cwd = sourceDir)
+ * mapping {@link KiroInvocation.trustTools} to `--trust-tools` and never trusting a write tool. kiro
+ * has no write capability, so it cannot hand its result back via a file — it prints it to stdout,
+ * wrapped in the sentinel-delimited DUGOUT block the adapter locates and parses (the surrounding
+ * tool-activity narration `--no-interactive` streams is ignored).
  */
-export type KiroRun = (invocation: KiroInvocation) => Promise<void>;
+export type KiroRun = (invocation: KiroInvocation) => Promise<string>;
 
 export interface KiroDraftConfig {
-  /** Working area under which the adapter lays out a per-ticket read-only source + writable specs. */
+  /** Working area under which the adapter lays out a per-ticket read-only source mount. */
   workDir: string;
   /**
    * The kiro runner. Required (not optional with a throwing default) — there is no working default
@@ -47,35 +46,39 @@ export interface KiroDraftConfig {
   runKiro: KiroRun;
 }
 
-/** Read-only tool trust for draft mode: kiro may read/grep the source, never write it (invariant 2). */
-const READ_ONLY_TRUST = ["read", "grep"] as const;
+/**
+ * Read-only tool trust for draft mode: kiro may read the source (`fs_read` — its search mode also
+ * covers grep), never write (invariant 2). These are the installed CLI's real tool identifiers
+ * (`kiro-cli chat --help` lists `fs_read`/`fs_write`); an unknown name would be silently untrusted,
+ * which under `--no-interactive` leaves kiro unable to read at all.
+ */
+const READ_ONLY_TRUST = ["fs_read"] as const;
 
-/** The manifest kiro writes to `specsDir/result.json`; spec markdown lives in referenced files. */
-type KiroResultFile =
-  | { result: "drafted"; specs: Array<{ repo: string; markdownFile: string }> }
-  | { result: "needs-info"; reason: string }
-  | { result: "needs-clarification"; questions: Array<{ id: string; prompt: string }> };
+/** Sentinel that brackets kiro's result block on stdout, fencing it off from the tool-activity
+ * narration `--no-interactive` streams. Distinctive enough that spec markdown is very unlikely to
+ * contain it verbatim (the small residual risk: a spec that literally quotes these lines). */
+const BLOCK_BEGIN = "===DUGOUT BEGIN===";
+const BLOCK_END = "===DUGOUT END===";
 
 /**
  * Real draft-mode executor adapter (#4, ADR-0007): headless kiro, no sandbox (invariant 2). The
- * adapter symlinks the declared repos side-by-side under a source mount beside a writable specs
- * dir, re-assembles the prompt each call (kiro is one-shot), runs kiro with read-only tool trust
- * (read/grep, never write — that trust, not the mount, is what keeps the clones unmutated), and
- * parses the result it wrote into a {@link DraftOutcome}. The kiro invocation is injected so the
- * whole adapter is tested through the port with the CLI faked.
+ * adapter symlinks the declared repos side-by-side under a read-only source mount, re-assembles the
+ * prompt each call (kiro is one-shot), runs kiro with read-only tool trust (fs_read, never a write
+ * tool — so it has no write capability at all and the clones can't be mutated), and parses the
+ * sentinel-delimited DUGOUT block kiro prints on stdout into a {@link DraftOutcome}. The kiro
+ * invocation is injected so the whole adapter is tested through the port with the CLI faked.
  */
 export class KiroDraftAdapter implements ExecutorPort {
   constructor(private readonly config: KiroDraftConfig) {}
 
   async draft(input: DraftInput): Promise<DraftOutcome> {
-    const { sourceDir, specsDir } = await this.layout(input);
-    await this.config.runKiro({
-      prompt: assemblePrompt(input, specsDir),
+    const sourceDir = await this.layout(input);
+    const stdout = await this.config.runKiro({
+      prompt: assemblePrompt(input),
       sourceDir,
-      specsDir,
       trustTools: READ_ONLY_TRUST,
     });
-    return this.parseResult(specsDir);
+    return parseOutcome(stdout);
   }
 
   async execute(_input: ExecuteInput): Promise<ExecuteOutcome> {
@@ -83,117 +86,106 @@ export class KiroDraftAdapter implements ExecutorPort {
   }
 
   /**
-   * Lay out a fresh per-ticket run dir: a `source/` with each cloned declared repo symlinked in
-   * side-by-side (multi-repo layout), and an empty writable `specs/`. The adapter itself never
-   * writes to `source/`; kiro is prevented from writing by being granted only read/grep tool
-   * trust (the symlinks are not filesystem-read-only — that trust is the boundary).
+   * Lay out a fresh per-ticket `source/` with each cloned declared repo symlinked in side-by-side
+   * (multi-repo layout). The adapter never writes to it, and kiro has no write trust, so the
+   * developer's clones are not mutated.
    */
-  private async layout(input: DraftInput): Promise<{ sourceDir: string; specsDir: string }> {
-    const runRoot = join(this.config.workDir, input.ticket.key);
-    const sourceDir = join(runRoot, "source");
-    const specsDir = join(runRoot, "specs");
-    await rm(runRoot, { recursive: true, force: true });
+  private async layout(input: DraftInput): Promise<string> {
+    const sourceDir = join(this.config.workDir, input.ticket.key, "source");
+    await rm(join(this.config.workDir, input.ticket.key), { recursive: true, force: true });
     await mkdir(sourceDir, { recursive: true });
-    await mkdir(specsDir, { recursive: true });
     for (const repo of input.repos) {
       if (repo.clone.status !== "cloned") continue; // not-cloned repos have no local source to read
       // resolve() so a relative clone path isn't mis-interpreted relative to the symlink's own dir.
       await symlink(resolve(repo.clone.path), join(sourceDir, repo.identity.name));
     }
-    return { sourceDir, specsDir };
-  }
-
-  /**
-   * Read + validate the manifest kiro wrote, resolving spec markdown files into a DraftOutcome.
-   * The manifest is untrusted one-shot-agent output, so every field is validated and the whole
-   * thing fails loudly (never a raw parse/IO crash, never an out-of-tree read) on anything off.
-   */
-  private async parseResult(specsDir: string): Promise<DraftOutcome> {
-    const manifest = parseManifest(await readFile(join(specsDir, "result.json"), "utf8"));
-    switch (manifest.result) {
-      case "drafted": {
-        const specs: DraftedSpec[] = [];
-        for (const s of manifest.specs) {
-          const markdown = await readFile(specMarkdownPath(specsDir, s.markdownFile), "utf8");
-          specs.push({ repo: s.repo, markdown });
-        }
-        return { result: "drafted", specs };
-      }
-      case "needs-info":
-        return { result: "needs-info", reason: manifest.reason };
-      case "needs-clarification":
-        return { result: "needs-clarification", questions: manifest.questions };
-      default:
-        return assertNever(manifest, "parseResult: unsupported kiro result");
-    }
-  }
-}
-
-/** Parse + validate the untrusted manifest into a typed {@link KiroResultFile}, or throw clearly. */
-function parseManifest(raw: string): KiroResultFile {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("kiro wrote an unparseable result.json");
-  }
-  if (!isRecord(parsed)) throw new Error("kiro result.json is not an object");
-
-  switch (parsed.result) {
-    case "drafted": {
-      if (!Array.isArray(parsed.specs)) throw new Error("kiro drafted result has no specs array");
-      const specs = parsed.specs.map((s) => {
-        if (!isRecord(s) || typeof s.repo !== "string" || typeof s.markdownFile !== "string") {
-          throw new Error("kiro drafted a spec missing a string repo/markdownFile");
-        }
-        return { repo: s.repo, markdownFile: s.markdownFile };
-      });
-      return { result: "drafted", specs };
-    }
-    case "needs-info":
-      if (typeof parsed.reason !== "string") throw new Error("kiro needs-info has no reason");
-      return { result: "needs-info", reason: parsed.reason };
-    case "needs-clarification": {
-      if (!Array.isArray(parsed.questions)) throw new Error("kiro needs-clarification has no questions");
-      const questions = parsed.questions.map((q) => {
-        if (!isRecord(q) || typeof q.id !== "string" || typeof q.prompt !== "string") {
-          throw new Error("kiro asked a question missing a string id/prompt");
-        }
-        return { id: q.id, prompt: q.prompt };
-      });
-      return { result: "needs-clarification", questions };
-    }
-    default:
-      throw new Error(`kiro returned an unsupported result: ${JSON.stringify(parsed.result)}`);
+    return sourceDir;
   }
 }
 
 /**
- * Resolve a spec's markdown file inside the writable specs dir, refusing any `markdownFile` that
- * escapes it (`..`, absolute path) — the manifest is untrusted, so a traversal must not read an
- * arbitrary file into canonical spec content.
+ * Parse kiro's stdout into a {@link DraftOutcome}, or throw clearly. The output is untrusted
+ * one-shot-agent text interleaved with tool-activity narration, so we first locate the
+ * sentinel-delimited DUGOUT block (last one wins, so a superseded earlier block is ignored), then
+ * read its `RESULT:` discriminant. A missing block or unknown result throws with a snippet of the
+ * raw output — fail-safe by design (never silently accept; the developer re-runs) and so the
+ * methodology prompt can be tuned.
  */
-function specMarkdownPath(specsDir: string, markdownFile: string): string {
-  const base = resolve(specsDir);
-  const full = resolve(base, markdownFile);
-  if (full !== base && !full.startsWith(base + sep)) {
-    throw new Error(`kiro spec markdownFile escapes the specs directory: ${markdownFile}`);
+function parseOutcome(stdout: string): DraftOutcome {
+  const block = lastBlock(stdout);
+  if (block === null) {
+    throw new Error(
+      `kiro output had no ${BLOCK_BEGIN} … ${BLOCK_END} block. First 500 chars of stdout:\n${stdout.slice(0, 500)}`,
+    );
   }
-  return full;
+
+  const newline = block.indexOf("\n");
+  const firstLine = (newline === -1 ? block : block.slice(0, newline)).trim();
+  const body = newline === -1 ? "" : block.slice(newline + 1);
+
+  const result = firstLine.match(/^RESULT:\s*(.+)$/)?.[1]?.trim();
+  switch (result) {
+    case "drafted":
+      return { result: "drafted", specs: parseSpecs(body) };
+    case "needs-info": {
+      const reason = body.trim();
+      if (!reason) throw new Error("kiro returned needs-info with no reason");
+      return { result: "needs-info", reason };
+    }
+    case "needs-clarification": {
+      const questions = body
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        // The harness assigns ids by order — the agent supplies none (one less thing to get right);
+        // ids only thread answers back via priorClarifications.
+        .map((prompt, i) => ({ id: `q${i + 1}`, prompt }));
+      if (questions.length === 0) throw new Error("kiro returned needs-clarification with no questions");
+      return { result: "needs-clarification", questions };
+    }
+    default:
+      throw new Error(
+        `kiro block's first line was not a known "RESULT: drafted|needs-info|needs-clarification": ${JSON.stringify(firstLine)}`,
+      );
+  }
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
+/** The content between the last {@link BLOCK_BEGIN}…{@link BLOCK_END} pair, or null if none. */
+function lastBlock(stdout: string): string | null {
+  // Tolerate trailing whitespace after a sentinel line — LLM output is rarely byte-exact.
+  const re = new RegExp(`${BLOCK_BEGIN}[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n?[ \\t]*${BLOCK_END}`, "g");
+  const blocks = [...stdout.matchAll(re)];
+  return blocks.length === 0 ? null : blocks[blocks.length - 1]![1]!;
+}
+
+/**
+ * Split a drafted block's body on its `===SPEC <repo>===` headers: each header's label is the repo,
+ * the text until the next header (or the block's end) is that spec's markdown, verbatim and trimmed.
+ */
+function parseSpecs(body: string): DraftedSpec[] {
+  const headerRe = /^===SPEC[ \t]+(.+?)[ \t]*===[ \t]*$/gm;
+  const headers = [...body.matchAll(headerRe)];
+  if (headers.length === 0) {
+    throw new Error("kiro returned a drafted result with no ===SPEC <repo>=== sections");
+  }
+  return headers.map((header, i) => {
+    const repo = header[1]!.trim();
+    const start = header.index + header[0].length;
+    const end = i + 1 < headers.length ? headers[i + 1]!.index : body.length;
+    const markdown = body.slice(start, end).trim();
+    if (!markdown) throw new Error(`kiro drafted a spec for "${repo}" with empty markdown`);
+    return { repo, markdown };
+  });
 }
 
 /**
  * Re-assemble the one-shot prompt from scratch each call (kiro has no session memory): the
  * methodology, the ticket, the declared repos, and any prior clarification rounds.
  */
-function assemblePrompt(input: DraftInput, specsDir: string): string {
+function assemblePrompt(input: DraftInput): string {
   const repos = input.repos.map((r) => r.identity.name).join(", ");
   const lines = [
-    draftMethodology(specsDir),
+    draftMethodology(),
     "",
     `Ticket ${input.ticket.key}: ${input.ticket.title}`,
     "",

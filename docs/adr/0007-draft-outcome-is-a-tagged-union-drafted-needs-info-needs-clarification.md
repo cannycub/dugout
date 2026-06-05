@@ -81,9 +81,17 @@ ADR-0006 repo-scope validation (every drafted spec targets a declared repo) unmi
   drawn only as far as #4's adapter-focused ACs require — deeper lifecycle is a follow-up.
 - `FakeExecutor.config.draft` widens from `DraftResult` to `DraftOutcome`; every outcome is a
   one-line literal a test can hand it (no real kiro in tests — #4 AC + CLAUDE.md).
-- The real adapter wraps `kiro-cli chat --no-interactive` with read-only tool trust
-  (`--trust-tools=read,grep`, never `write`) pointed at a source mount (the declared clones
-  symlinked side-by-side) beside a writable specs dir. Read-only is enforced by that **tool trust**,
-  not the filesystem — the symlinks expose the real clones, so the trust boundary is what keeps them
-  unmutated. The kiro invocation is dependency-injected (as `JiraReadAdapter` injects `fetch`), so
-  the whole adapter is tested through the port with the CLI faked.
+- The real adapter wraps `kiro-cli chat --no-interactive --wrap never` with read-only tool trust
+  (`--trust-tools=fs_read`, **never** a write tool) pointed at a source mount — the declared clones
+  symlinked side-by-side — as kiro's cwd. (`fs_read`/`fs_write` are the installed CLI's real tool
+  identifiers; `fs_read`'s search mode also covers grep, so a separate grep trust isn't needed.)
+  Because kiro is granted *no* write capability at all, it returns its result **on stdout** (it
+  cannot hand it back via a written file). This also makes the read-only guarantee airtight: with no
+  write trust, kiro physically cannot mutate the clones, so the trust boundary — not a
+  filesystem-read-only mount — is what protects them. (An earlier design had kiro write a
+  `result.json` into a writable specs dir; a live run proved that incompatible with read-only trust,
+  since tool trust is categorical, not path-scoped — granting `write` for the manifest would also
+  permit writing through the symlinks.) With no write channel the result comes back on **stdout**;
+  the *wire format* on that channel is a sentinel-delimited text block, not JSON — see **ADR-0009**.
+  The kiro invocation is dependency-injected (as `JiraReadAdapter` injects `fetch`), so the whole
+  adapter is tested through the port with the CLI faked.
