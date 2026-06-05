@@ -30,13 +30,21 @@ export function App() {
     void dugout.listTickets().then(setTickets);
   }, [dugout]);
 
-  // When a ticket is picked, load any existing run-state for it.
+  // When a ticket is picked, load any existing run-state for it. Guard against an out-of-order
+  // resolve when the developer switches tickets quickly, so a stale story can't overwrite the
+  // current selection (mirrors the search guard in DeclareRepos).
   useEffect(() => {
     if (!selectedKey) {
       setStory(null);
       return;
     }
-    void dugout.getStory(selectedKey).then(setStory);
+    let live = true;
+    void dugout.getStory(selectedKey).then((s) => {
+      if (live) setStory(s);
+    });
+    return () => {
+      live = false;
+    };
   }, [dugout, selectedKey]);
 
   const selectedTicket = tickets.find((t) => t.key === selectedKey) ?? null;
