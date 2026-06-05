@@ -19,7 +19,7 @@ function orchestratorWithScope() {
   );
   return new Orchestrator({
     jira: new FakeJira({ tickets: [] }),
-    executor: new FakeExecutor({ draft: { specs: [] } }),
+    executor: new FakeExecutor({ draft: { result: "drafted", specs: [] } }),
     github: new FakeGitHub(),
     metrics: new FakeMetrics(),
     envReplay: new FakeEnvReplay(),

@@ -5,7 +5,11 @@
  */
 
 import type { Story, Preflight } from "../core/domain.js";
+import type { DraftStoryResult } from "../core/orchestrator.js";
+import type { ExecutorMode } from "../core/switchable-executor.js";
 import type { Ticket } from "../core/ports/jira.js";
+
+export type { ExecutorMode };
 import type { PullRequest } from "../core/ports/github.js";
 import type { DeclaredRepo, RepoMatch } from "../core/repo-scope.js";
 
@@ -28,6 +32,8 @@ export const CHANNELS = {
   resume: "dugout:resume",
   restart: "dugout:restart",
   createPullRequests: "dugout:createPullRequests",
+  getExecutorMode: "dugout:getExecutorMode",
+  setExecutorMode: "dugout:setExecutorMode",
   event: "dugout:event",
 } as const;
 
@@ -35,7 +41,11 @@ export const CHANNELS = {
 export interface DugoutApi {
   listTickets(): Promise<Ticket[]>;
   getStory(storyKey: string): Promise<Story | null>;
-  draft(storyKey: string, repos: DeclaredRepo[]): Promise<Story>;
+  /**
+   * Draft the fan-out. Returns a discriminated {@link DraftStoryResult}: a `drafted` story, or a
+   * `needs-info` / `needs-clarification` stop the agent returned rather than guess (ADR-0007).
+   */
+  draft(storyKey: string, repos: DeclaredRepo[]): Promise<DraftStoryResult>;
   /** Search the catalog; each match carries its clone binding. v1: local filter. */
   searchRepos(query: string): Promise<RepoMatch[]>;
   /** Bind chosen catalog names to local clones, re-resolved server-side against the current index. */
@@ -49,6 +59,10 @@ export interface DugoutApi {
   resume(storyKey: string): Promise<Story>;
   restart(storyKey: string): Promise<Story>;
   createPullRequests(storyKey: string): Promise<PullRequest[]>;
+  /** Which executor backs drafting — fakes, or the real (kiro) live path. */
+  getExecutorMode(): Promise<ExecutorMode>;
+  /** Switch the draft executor at runtime (persisted across restarts). */
+  setExecutorMode(mode: ExecutorMode): Promise<void>;
   /** Subscribe to streamed telemetry; returns an unsubscribe function. */
   onEvent(listener: (event: DugoutEvent) => void): () => void;
 }

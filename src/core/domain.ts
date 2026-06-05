@@ -33,6 +33,12 @@ export type StoryStatus =
 
 /** Pre-flight choices the developer makes when approving the spec set as a unit. */
 export interface Preflight {
+  /**
+   * Spec ids the developer designates as replay specs (verified by a replay, not the spec's own
+   * tests). The developer makes this call, not the draft agent (ADR-0008). Replay specs default
+   * `review-required`.
+   */
+  replaySpecs?: string[];
   /** Spec ids the developer marks `review-required` (on top of the replay-spec default). */
   reviewRequired?: string[];
 }

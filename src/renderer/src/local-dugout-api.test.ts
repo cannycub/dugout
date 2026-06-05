@@ -9,7 +9,7 @@ describe("local DugoutApi — declareRepos", () => {
     const workspace = new FakeWorkspace({ roots: ["/ws"], clones: [] });
     const api = createLocalDugoutApi({
       tickets: [],
-      draft: { specs: [] },
+      draft: { result: "drafted", specs: [] },
       repoScope: new RepoScope(
         new FakeCatalog([{ name: "widget-api", remote: "git@github.com:acme/widget-api.git" }]),
         workspace,

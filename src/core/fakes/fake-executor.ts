@@ -1,26 +1,29 @@
 import type {
   DraftInput,
-  DraftResult,
+  DraftOutcome,
   ExecuteInput,
   ExecuteOutcome,
   ExecutorPort,
 } from "../ports/executor.js";
 
 export interface FakeExecutorConfig {
-  /** Canned draft result returned for any draft() call. */
-  draft: DraftResult;
+  /** Canned draft outcome returned for any draft() call (any DraftOutcome variant). */
+  draft: DraftOutcome;
   /** Per-spec execute outcomes keyed by specId. Specs not listed default to green. */
   execute?: Record<string, ExecuteOutcome>;
 }
 
 /** In-memory executor adapter returning canned results — no kiro, no Docker. */
 export class FakeExecutor implements ExecutorPort {
+  /** Records draft() calls in order, so tests can assert the harness threaded continuity. */
+  readonly draftCalls: DraftInput[] = [];
   /** Records execute() calls in order, so tests can assert the fixed execution order. */
   readonly executeCalls: ExecuteInput[] = [];
 
   constructor(private readonly config: FakeExecutorConfig) {}
 
-  async draft(_input: DraftInput): Promise<DraftResult> {
+  async draft(input: DraftInput): Promise<DraftOutcome> {
+    this.draftCalls.push(input);
     return this.config.draft;
   }
 

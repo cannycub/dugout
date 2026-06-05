@@ -1,5 +1,5 @@
 import type { Ticket } from "../core/ports/jira.js";
-import type { DraftResult } from "../core/ports/executor.js";
+import type { DraftOutcome } from "../core/ports/executor.js";
 import type { RepoIdentity } from "../core/ports/catalog.js";
 
 /** The single hardcoded ticket the walking skeleton flows end-to-end (#2). */
@@ -20,10 +20,11 @@ export const SEED_CATALOG: RepoIdentity[] = [
 
 /**
  * Canned fan-out the fake executor returns for the seed ticket: three single-repo specs across
- * two repos, with the pipeline spec flagged as the replay spec (→ default review-required), so
- * the lifecycle demonstrates a review-required stop and two fully-linked PRs.
+ * two repos. The agent does not flag replay specs (ADR-0008); the walking skeleton demonstrates a
+ * review-required stop by the developer marking a spec review-required at pre-flight.
  */
-export const SEED_DRAFT: DraftResult = {
+export const SEED_DRAFT: DraftOutcome = {
+  result: "drafted",
   specs: [
     {
       repo: "widget-api",
@@ -40,17 +41,15 @@ export const SEED_DRAFT: DraftResult = {
     },
     {
       repo: "pipeline",
-      isReplaySpec: true,
       markdown: [
-        "# Spec: ingest & reprocess widget events (pipeline) — REPLAY SPEC",
+        "# Spec: ingest & reprocess widget events (pipeline)",
         "",
         "## Acceptance criteria",
         "- The pipeline consumes `WidgetChanged` and materializes the widget timeline.",
-        "- Verified by a replay run (human-verified via Athena).",
         "",
         "## Test plan (test-first)",
         "1. RED: timeline projection from a fixture stream.",
-        "2. GREEN: implement the projector. Replay verification happens at the review stop.",
+        "2. GREEN: implement the projector.",
       ].join("\n"),
     },
     {

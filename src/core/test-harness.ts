@@ -6,7 +6,7 @@ import { FakeMetrics } from "./fakes/fake-metrics.js";
 import { FakeEnvReplay } from "./fakes/fake-env-replay.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
 import { InMemorySpecStore } from "./store/in-memory-spec-store.js";
-import type { DraftedSpec, ExecuteOutcome } from "./ports/executor.js";
+import type { DraftedSpec, DraftOutcome, ExecuteOutcome } from "./ports/executor.js";
 import type { Ticket } from "./ports/jira.js";
 import type { RunStateStore } from "./store/run-state-store.js";
 import type { SpecStore } from "./store/spec-store.js";
@@ -20,8 +20,12 @@ const DEFAULT_TICKET: Ticket = {
 
 export interface HarnessOptions {
   tickets?: Ticket[];
-  /** Drafted fan-out the fake executor returns. */
-  draft: DraftedSpec[];
+  /**
+   * What the fake executor's draft() returns. The common case is a drafted fan-out, so a bare
+   * `DraftedSpec[]` is wrapped as `{ result: "drafted", specs }`; pass a full {@link DraftOutcome}
+   * to exercise a `needs-info` / `needs-clarification` stop (ADR-0007).
+   */
+  draft: DraftedSpec[] | DraftOutcome;
   /** Per-spec execute outcomes (specs not listed default to green). */
   execute?: Record<string, ExecuteOutcome>;
   /** Run-state store override; defaults to a fresh in-memory store. */
@@ -33,8 +37,11 @@ export interface HarnessOptions {
 /** Builds an Orchestrator wired to all five fake ports + both stores, exposed for assertions. */
 export function makeHarness(options: HarnessOptions) {
   const jira = new FakeJira({ tickets: options.tickets ?? [DEFAULT_TICKET] });
+  const draft: DraftOutcome = Array.isArray(options.draft)
+    ? { result: "drafted", specs: options.draft }
+    : options.draft;
   const executor = new FakeExecutor({
-    draft: { specs: options.draft },
+    draft,
     ...(options.execute ? { execute: options.execute } : {}),
   });
   const github = new FakeGitHub();

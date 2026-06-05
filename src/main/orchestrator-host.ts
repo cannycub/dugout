@@ -12,7 +12,11 @@ import { RepoScope } from "../core/repo-scope.js";
 import { GitHubCatalog } from "../core/adapters/github-catalog.js";
 import { GitWorkspace } from "../core/adapters/git-workspace.js";
 import { JiraReadAdapter } from "../core/adapters/jira-read-adapter.js";
+import { KiroDraftAdapter } from "../core/adapters/kiro-draft-adapter.js";
+import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
+import { SwitchableExecutor, type ExecutorMode } from "../core/switchable-executor.js";
 import { JiraCredentialStore } from "./jira-credentials.js";
+import { SettingsStore } from "./settings-store.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
@@ -55,13 +59,23 @@ function workspaceRoots(): string[] {
   return raw ? raw.split(":").filter(Boolean) : [];
 }
 
+/** Runtime control over which executor backs drafting, persisting the choice across restarts. */
+export interface ExecutorModeControl {
+  get(): ExecutorMode;
+  set(mode: ExecutorMode): void;
+}
+
 /**
- * Wires the orchestrator. The executor stays fake (no kiro yet); the repo-scope seam is real
- * (GitHub-org catalog — still seeded via FakeGitHub until a real list adapter lands — + local
- * clone discovery). Jira is the real API-token adapter only when the developer has saved
- * credentials (ADR-0005); otherwise the seed fake keeps dev/test working without live Jira.
+ * Wires the orchestrator. Drafting runs through a {@link SwitchableExecutor}: the developer flips it
+ * from the UI between the in-memory fakes and the real (kiro) live path; execute mode stays fake
+ * (no sandbox adapter yet). The repo-scope seam is real (GitHub-org catalog — still seeded via
+ * FakeGitHub until a real list adapter lands — + local clone discovery). Jira is the real API-token
+ * adapter only when the developer has saved credentials (ADR-0005); otherwise the seed fake keeps
+ * dev/test working without live Jira.
  */
-export async function createOrchestrator(userDataDir: string): Promise<Orchestrator> {
+export async function createOrchestrator(
+  userDataDir: string,
+): Promise<{ orchestrator: Orchestrator; modeControl: ExecutorModeControl }> {
   const github = new FakeGitHub(SEED_CATALOG);
 
   let jira: JiraPort = new FakeJira({ tickets: [SEED_TICKET] });
@@ -73,9 +87,32 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     new GitWorkspace({ roots: workspaceRoots() }),
   );
 
-  return new Orchestrator({
+  // Draft executor is switchable: fakes (seed) ↔ live (real kiro, read-only). Initial mode is the
+  // developer's persisted choice; switching persists the new choice (best-effort).
+  const settings = new SettingsStore(join(userDataDir, "settings.json"));
+  const executor = new SwitchableExecutor({
+    fake: new FakeExecutor({ draft: SEED_DRAFT }),
+    live: new KiroDraftAdapter({
+      workDir: join(userDataDir, "kiro-work"),
+      runKiro: spawnKiroRunner(),
+    }),
+    mode: settings.load().executorMode,
+  });
+  const modeControl: ExecutorModeControl = {
+    get: () => executor.getMode(),
+    set: (mode) => {
+      executor.setMode(mode);
+      try {
+        settings.save({ executorMode: mode });
+      } catch (err) {
+        console.warn(`[dugout] could not persist executor mode (non-blocking): ${String(err)}`);
+      }
+    },
+  };
+
+  const orchestrator = new Orchestrator({
     jira,
-    executor: new FakeExecutor({ draft: SEED_DRAFT }),
+    executor,
     github,
     metrics: new MetricsForwarder(),
     envReplay: new FakeEnvReplay(),
@@ -83,6 +120,7 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     store: openRunStateStore(userDataDir),
     repoScope,
   });
+  return { orchestrator, modeControl };
 }
 
 export { broadcast };
