@@ -37,3 +37,18 @@ the company org later).
 - **Spec content is canonical in git** (the `SpecStore` seam); **SQLite holds only ephemeral,
   rebuildable run-state** (lifecycle status, sandbox/branch bookkeeping). Never persist spec
   content as run-state.
+
+## Testing — the pyramid
+
+Three tiers. Put each piece of behaviour at the lowest tier that can actually prove it.
+
+1. **Unit** — discrete logic through the ports with fakes (the orchestration state machine is the
+   highest-value target); real git on throwaway temp repos for git mechanics. The default
+   `npx vitest run` suite.
+2. **End-to-end** — drives the **UI** and runs **against the fakes** (deterministic). Proves the
+   wiring/plumbing through real Electron IPC, not external correctness. `npm run test:e2e`.
+3. **Agent integration** — runs against the **real** agent (e.g. real kiro), because ordinary APIs
+   fake cleanly but **agent (LLM) responses do not** — only a real run proves the agent behaves
+   correctly. The agent is **stateless**, so these are parallel-safe. They **do NOT run in CI**
+   (slow, billable, non-deterministic, need secrets) but **MUST be runnable locally as a suite**.
+   Seed: `*.live.test.ts` gated by `KIRO_LIVE=1`.
