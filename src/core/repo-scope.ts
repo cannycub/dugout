@@ -24,3 +24,23 @@ export interface DeclaredRepo {
   identity: RepoIdentity;
   clone: CloneBinding;
 }
+
+/**
+ * Reduce a git remote URL to a stable content-address key so ssh and https forms of the same
+ * repo match: strip scheme/credentials, the trailing `.git` and slash, and lowercase host+path.
+ * `git@github.com:acme/widget.git` and `https://github.com/acme/widget` → `github.com/acme/widget`.
+ */
+export function canonicalRemote(url: string | undefined): string {
+  if (!url) return "";
+  let s = url.trim();
+  // scp-like ssh form: git@host:owner/repo(.git)
+  const scp = /^[^/@]+@([^:]+):(.+)$/.exec(s);
+  if (scp) {
+    s = `${scp[1]}/${scp[2]}`;
+  } else {
+    s = s.replace(/^[a-z]+:\/\//i, ""); // drop scheme
+    s = s.replace(/^[^/@]+@/, ""); // drop user@ (ssh://user@host/…)
+  }
+  s = s.replace(/\/+$/, "").replace(/\.git$/i, "");
+  return s.toLowerCase();
+}
