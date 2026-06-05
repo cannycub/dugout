@@ -14,6 +14,23 @@ export interface JiraCredentials {
 }
 
 /**
+ * Read Jira credentials from environment variables — a dev/testing stopgap until the settings UI
+ * (#17) lands. Mirrors `DUGOUT_WORKSPACE_ROOTS`: env is the only knob until then, because nothing
+ * yet calls {@link JiraCredentialStore.save}, so without this the app can never reach live Jira.
+ * Returns null unless all three are set, so a partial config degrades to the seed fake rather than
+ * building an adapter that would 401 (ADR-0005: Jira auth never blocks startup).
+ */
+export function jiraCredentialsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): JiraCredentials | null {
+  const baseUrl = env["DUGOUT_JIRA_BASE_URL"];
+  const email = env["DUGOUT_JIRA_EMAIL"];
+  const token = env["DUGOUT_JIRA_TOKEN"];
+  if (!baseUrl || !email || !token) return null;
+  return { baseUrl, email, token };
+}
+
+/**
  * Stores the developer's Jira API token encrypted at rest via Electron safeStorage (ADR-0005).
  * The token is the developer's own identity; it is never persisted as run-state or in git.
  */

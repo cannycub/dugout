@@ -15,7 +15,7 @@ import { JiraReadAdapter } from "../core/adapters/jira-read-adapter.js";
 import { KiroDraftAdapter } from "../core/adapters/kiro-draft-adapter.js";
 import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
 import { SwitchableExecutor, type ExecutorMode } from "../core/switchable-executor.js";
-import { JiraCredentialStore } from "./jira-credentials.js";
+import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
 import { SettingsStore } from "./settings-store.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
@@ -70,16 +70,21 @@ export interface ExecutorModeControl {
  * from the UI between the in-memory fakes and the real (kiro) live path; execute mode stays fake
  * (no sandbox adapter yet). The repo-scope seam is real (GitHub-org catalog — still seeded via
  * FakeGitHub until a real list adapter lands — + local clone discovery). Jira is the real API-token
- * adapter only when the developer has saved credentials (ADR-0005); otherwise the seed fake keeps
- * dev/test working without live Jira.
+ * adapter when the developer has saved credentials (ADR-0005) or set the `DUGOUT_JIRA_*` env vars (a
+ * stopgap until the settings UI #17 lands); otherwise the seed fake keeps dev/test working without
+ * live Jira.
  */
 export async function createOrchestrator(
   userDataDir: string,
 ): Promise<{ orchestrator: Orchestrator; modeControl: ExecutorModeControl }> {
   const github = new FakeGitHub(SEED_CATALOG);
 
+  // Live Jira when the developer has saved credentials (ADR-0005); else the env-var stopgap (until
+  // the settings UI #17 lands — nothing yet calls save(), so env is the only path to live Jira);
+  // else the seed fake keeps dev/test working without live Jira.
   let jira: JiraPort = new FakeJira({ tickets: [SEED_TICKET] });
-  const creds = await new JiraCredentialStore(join(userDataDir, "jira.cred"), safeStorage).load();
+  const saved = await new JiraCredentialStore(join(userDataDir, "jira.cred"), safeStorage).load();
+  const creds = saved ?? jiraCredentialsFromEnv();
   if (creds) jira = new JiraReadAdapter(creds);
 
   const repoScope = new RepoScope(

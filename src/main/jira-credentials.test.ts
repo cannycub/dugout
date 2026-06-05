@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JiraCredentialStore, type SafeStorageLike } from "./jira-credentials.js";
+import {
+  JiraCredentialStore,
+  jiraCredentialsFromEnv,
+  type SafeStorageLike,
+} from "./jira-credentials.js";
 
 // Reversible "encryption" stand-in for safeStorage (real safeStorage is unavailable in vitest).
 const fakeSafe: SafeStorageLike = {
@@ -48,5 +52,31 @@ describe("JiraCredentialStore", () => {
     });
     const store = new JiraCredentialStore(file, throwingSafe);
     expect(await store.load()).toBeNull();
+  });
+});
+
+describe("jiraCredentialsFromEnv", () => {
+  it("reads all three credential fields from the environment", () => {
+    expect(
+      jiraCredentialsFromEnv({
+        DUGOUT_JIRA_BASE_URL: "https://acme.atlassian.net",
+        DUGOUT_JIRA_EMAIL: "d@a.com",
+        DUGOUT_JIRA_TOKEN: "tok",
+      }),
+    ).toEqual({ baseUrl: "https://acme.atlassian.net", email: "d@a.com", token: "tok" });
+  });
+
+  it("returns null unless all three are set, so a partial config falls back to the fake", () => {
+    expect(jiraCredentialsFromEnv({})).toBeNull();
+    expect(
+      jiraCredentialsFromEnv({ DUGOUT_JIRA_BASE_URL: "https://acme.atlassian.net" }),
+    ).toBeNull();
+    expect(
+      jiraCredentialsFromEnv({
+        DUGOUT_JIRA_BASE_URL: "https://acme.atlassian.net",
+        DUGOUT_JIRA_EMAIL: "d@a.com",
+        // token missing
+      }),
+    ).toBeNull();
   });
 });
