@@ -88,8 +88,8 @@ function registerIpc(orchestrator: Orchestrator): void {
   });
 }
 
-app.whenReady().then(() => {
-  const orchestrator = createOrchestrator(app.getPath("userData"));
+app.whenReady().then(async () => {
+  const orchestrator = await createOrchestrator(app.getPath("userData"));
   registerIpc(orchestrator);
   createWindow();
 
