@@ -61,6 +61,7 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
       return story;
     },
     searchRepos: (query) => orchestrator.searchRepos(query),
+    declareRepos: (names) => orchestrator.declareRepos(names),
     rescanRepos: () => orchestrator.rescanRepos(),
     listWorkspaceRoots: () => orchestrator.listWorkspaceRoots(),
     approve: async (key, preflight) => {

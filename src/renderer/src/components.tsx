@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import type { Story, Spec } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
-import type { RepoMatch, DeclaredRepo, CloneBinding } from "../../core/repo-scope.js";
+import type { RepoMatch, CloneBinding } from "../../core/repo-scope.js";
 import { useDugout } from "./dugout-context.js";
 import { SPEC_META, RIBBON_STAGES, stageIndex } from "./lifecycle.js";
 
@@ -285,13 +285,13 @@ export function DeclareRepos({
   onDeclare,
   busy,
 }: {
-  onDeclare: (repos: DeclaredRepo[]) => void;
+  onDeclare: (names: string[]) => void;
   busy: boolean;
 }) {
   const dugout = useDugout();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoMatch[]>([]);
-  const [selected, setSelected] = useState<Map<string, RepoMatch>>(new Map());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rescanning, setRescanning] = useState(false);
 
   useEffect(() => {
@@ -304,11 +304,11 @@ export function DeclareRepos({
     };
   }, [dugout, query]);
 
-  const toggle = (match: RepoMatch) => {
+  const toggle = (name: string) => {
     setSelected((prev) => {
-      const next = new Map(prev);
-      if (next.has(match.identity.name)) next.delete(match.identity.name);
-      else next.set(match.identity.name, match);
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
       return next;
     });
   };
@@ -323,8 +323,8 @@ export function DeclareRepos({
     }
   };
 
-  const declare = () =>
-    onDeclare([...selected.values()].map((m) => ({ identity: m.identity, clone: m.clone })));
+  // Hand the chosen names up; binding is re-resolved server-side at declare time.
+  const declare = () => onDeclare([...selected]);
 
   return (
     <div className="field declare-field">
@@ -356,7 +356,7 @@ export function DeclareRepos({
                 className={`repo-result ${isSel ? "selected" : ""}`}
                 key={match.identity.name}
                 aria-pressed={isSel}
-                onClick={() => toggle(match)}
+                onClick={() => toggle(match.identity.name)}
               >
                 <span className="repo-check" aria-hidden>
                   {isSel ? "✓" : ""}

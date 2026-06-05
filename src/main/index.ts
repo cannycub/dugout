@@ -54,6 +54,7 @@ function registerIpc(orchestrator: Orchestrator): void {
   });
 
   ipcMain.handle(CHANNELS.searchRepos, (_e, query: string) => orchestrator.searchRepos(query));
+  ipcMain.handle(CHANNELS.declareRepos, (_e, names: string[]) => orchestrator.declareRepos(names));
   ipcMain.handle(CHANNELS.rescanRepos, () => orchestrator.rescanRepos());
   ipcMain.handle(CHANNELS.listWorkspaceRoots, () => orchestrator.listWorkspaceRoots());
 

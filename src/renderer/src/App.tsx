@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
-import type { DeclaredRepo } from "../../core/repo-scope.js";
 import { useDugout } from "./dugout-context.js";
 import {
   StatusRibbon,
@@ -74,8 +73,12 @@ export function App() {
   }, []);
 
   const key = selectedKey ?? "";
-  const onDeclareAndDraft = (repos: DeclaredRepo[]) =>
-    guard(async () => setStory(await dugout.draft(key, repos)));
+  const onDeclareAndDraft = (names: string[]) =>
+    guard(async () => {
+      // Bind the chosen names server-side (authoritative, fresh), then draft the fan-out.
+      const repos = await dugout.declareRepos(names);
+      setStory(await dugout.draft(key, repos));
+    });
   const onApprove = () =>
     guard(async () => setStory(await dugout.approve(key, { reviewRequired: [...reviewSel] })));
   const onRun = () => guard(async () => setStory(await dugout.run(key)));

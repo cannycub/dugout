@@ -10,6 +10,7 @@ const api: DugoutApi = {
   getStory: (key) => ipcRenderer.invoke(CHANNELS.getStory, key),
   draft: (key, repos) => ipcRenderer.invoke(CHANNELS.draft, key, repos),
   searchRepos: (query) => ipcRenderer.invoke(CHANNELS.searchRepos, query),
+  declareRepos: (names) => ipcRenderer.invoke(CHANNELS.declareRepos, names),
   rescanRepos: () => ipcRenderer.invoke(CHANNELS.rescanRepos),
   listWorkspaceRoots: () => ipcRenderer.invoke(CHANNELS.listWorkspaceRoots),
   approve: (key, preflight) => ipcRenderer.invoke(CHANNELS.approve, key, preflight),

@@ -20,6 +20,7 @@ export const CHANNELS = {
   getStory: "dugout:getStory",
   draft: "dugout:draft",
   searchRepos: "dugout:searchRepos",
+  declareRepos: "dugout:declareRepos",
   rescanRepos: "dugout:rescanRepos",
   listWorkspaceRoots: "dugout:listWorkspaceRoots",
   approve: "dugout:approve",
@@ -37,6 +38,8 @@ export interface DugoutApi {
   draft(storyKey: string, repos: DeclaredRepo[]): Promise<Story>;
   /** Search the catalog; each match carries its clone binding. v1: local filter. */
   searchRepos(query: string): Promise<RepoMatch[]>;
+  /** Bind chosen catalog names to local clones, re-resolved server-side against the current index. */
+  declareRepos(names: string[]): Promise<DeclaredRepo[]>;
   /** Re-scan workspace roots (after the dev clones something mid-flight). */
   rescanRepos(): Promise<void>;
   /** The developer's configured workspace roots (for display). */
