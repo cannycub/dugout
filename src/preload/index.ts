@@ -8,7 +8,8 @@ import { CHANNELS, type DugoutApi, type DugoutEvent } from "../shared/dugout-api
 const api: DugoutApi = {
   listTickets: () => ipcRenderer.invoke(CHANNELS.listTickets),
   getStory: (key) => ipcRenderer.invoke(CHANNELS.getStory, key),
-  draft: (key, repos) => ipcRenderer.invoke(CHANNELS.draft, key, repos),
+  draft: (key, repos, clarifications) =>
+    ipcRenderer.invoke(CHANNELS.draft, key, repos, clarifications),
   searchRepos: (query) => ipcRenderer.invoke(CHANNELS.searchRepos, query),
   declareRepos: (names) => ipcRenderer.invoke(CHANNELS.declareRepos, names),
   rescanRepos: () => ipcRenderer.invoke(CHANNELS.rescanRepos),

@@ -1,5 +1,5 @@
 import type { Story, Spec, SpecContent, StorySpecs, StoryRunState, Preflight } from "./domain.js";
-import type { ExecutorPort, ClarifyingQuestion } from "./ports/executor.js";
+import type { ExecutorPort, ClarifyingQuestion, ClarificationRound } from "./ports/executor.js";
 import { assertNever } from "./exhaustive.js";
 import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
@@ -96,14 +96,21 @@ export class Orchestrator {
    * {@link DraftStoryResult}: a `drafted` story, or one of the two "stop, don't guess" outcomes
    * the agent can return (ADR-0007, invariant 1). Only `drafted` persists anything.
    */
-  async draftStory(ticketKey: string, opts: { repos: DeclaredRepo[] }): Promise<DraftStoryResult> {
+  async draftStory(
+    ticketKey: string,
+    opts: { repos: DeclaredRepo[]; clarifications?: ClarificationRound[] },
+  ): Promise<DraftStoryResult> {
     const tickets = await this.deps.jira.listAssignedTickets();
     const ticket = tickets.find((t) => t.key === ticketKey);
     if (!ticket) {
       throw new Error(`Ticket ${ticketKey} is not assigned to this developer`);
     }
 
-    const outcome = await this.deps.executor.draft({ ticket, repos: opts.repos });
+    const outcome = await this.deps.executor.draft({
+      ticket,
+      repos: opts.repos,
+      ...(opts.clarifications ? { clarifications: opts.clarifications } : {}),
+    });
 
     switch (outcome.result) {
       case "needs-info":

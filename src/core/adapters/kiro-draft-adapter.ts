@@ -138,7 +138,7 @@ function parseOutcome(stdout: string): DraftOutcome {
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         // The harness assigns ids by order — the agent supplies none (one less thing to get right);
-        // ids only thread answers back via priorClarifications.
+        // ids only thread answers back via clarifications.
         .map((prompt, i) => ({ id: `q${i + 1}`, prompt }));
       if (questions.length === 0) throw new Error("kiro returned needs-clarification with no questions");
       return { result: "needs-clarification", questions };
@@ -195,7 +195,7 @@ function assemblePrompt(input: DraftInput): string {
   ];
   // kiro is one-shot with no session memory: fold every prior clarification round back in so a
   // re-draft sees the developer's earlier answers (continuity reconstructed by the harness).
-  const rounds = input.priorClarifications ?? [];
+  const rounds = input.clarifications ?? [];
   if (rounds.length > 0) {
     lines.push("", "Prior clarifications (already answered by the developer):");
     for (const round of rounds) {

@@ -11,6 +11,7 @@ import type { Ticket } from "../core/ports/jira.js";
 
 export type { ExecutorMode };
 import type { PullRequest } from "../core/ports/github.js";
+import type { ClarificationRound } from "../core/ports/executor.js";
 import type { DeclaredRepo, RepoMatch } from "../core/repo-scope.js";
 
 /** A streamed telemetry event (metric emit or lifecycle transition) shown in the UI log. */
@@ -44,8 +45,14 @@ export interface DugoutApi {
   /**
    * Draft the fan-out. Returns a discriminated {@link DraftStoryResult}: a `drafted` story, or a
    * `needs-info` / `needs-clarification` stop the agent returned rather than guess (ADR-0007).
+   * On a re-draft, pass the developer's answered `clarifications` (oldest-first) to close the
+   * needs-clarification loop; absent/empty on the first attempt.
    */
-  draft(storyKey: string, repos: DeclaredRepo[]): Promise<DraftStoryResult>;
+  draft(
+    storyKey: string,
+    repos: DeclaredRepo[],
+    clarifications?: ClarificationRound[],
+  ): Promise<DraftStoryResult>;
   /** Search the catalog; each match carries its clone binding. v1: local filter. */
   searchRepos(query: string): Promise<RepoMatch[]>;
   /** Bind chosen catalog names to local clones, re-resolved server-side against the current index. */
