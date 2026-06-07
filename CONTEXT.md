@@ -67,8 +67,15 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   directly (rename, small refactor, foundational change). Contrast a *running* spec, which only
   the harness writes — the dev never steers a running spec (invariant 1). Ownership of the line
   alternates by phase; "harness-owned" means single-writer-while-running, never human-forbidden.
+- **Lifecycle event** — a transition the orchestrator emits as it runs, through the **lifecycle
+  port**: a *story-level* status change (`drafted`, `approved`, `executing`, `awaiting-review`,
+  `failed`, `dev-complete`, `pr-created`) or a *spec-level* status change (`running`, `green`,
+  `merged`, `failed`) emitted per-transition during execution. Fire-and-forget; the renderer
+  consumes them to patch its held story by spec id and re-render fluidly (live per-spec progress).
+  The core emits a domain event with no wire timestamp; the transport adapter stamps it and
+  forwards. Distinct from **metrics**, which are Datadog-bound and **never** reach the UI.
 - **Port / adapter** — the interfaces orchestration depends on (executor, env/replay, Jira,
-  GitHub, metrics). Adapters swap (local v1 → cloud later); orchestration does not change.
+  GitHub, metrics, lifecycle). Adapters swap (local v1 → cloud later); orchestration does not change.
 
 ## Core invariants (do not violate without an ADR)
 
