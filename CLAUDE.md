@@ -51,4 +51,7 @@ Three tiers. Put each piece of behaviour at the lowest tier that can actually pr
    fake cleanly but **agent (LLM) responses do not** — only a real run proves the agent behaves
    correctly. The agent is **stateless**, so these are parallel-safe. They **do NOT run in CI**
    (slow, billable, non-deterministic, need secrets) but **MUST be runnable locally as a suite**.
-   Seed: `*.live.test.ts` gated by `KIRO_LIVE=1`.
+   Suite: `*.agent.test.ts`, run via `npm run test:agent`. They are **structurally excluded** from
+   the default `npm test`/CI (a vitest `exclude`), not gated by a runtime flag — a flag silently
+   skips and reports green, giving false confidence the agent was tested. They consume
+   `KIRO_API_KEY` (and optional `KIRO_BIN`) as inputs and **fail loudly** if absent — never skip.

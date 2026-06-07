@@ -49,6 +49,15 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   specs; the agent recommends it for performance-critical/concurrent specs.
 - **`needs-info`** — kickback state when a ticket is too thin to spec; the agent stops rather
   than guess. Also a Jira label.
+- **`needs-clarification`** — a *resumable* stop state: the agent **can** spec but is blocked on
+  specific, answerable questions. The developer answers and the harness re-drafts — contrast
+  `needs-info`, which is terminal-to-Jira (the ticket itself must change). The matched pair of
+  "stop, don't guess" outcomes (ADR-0007); the axis between them is whether there is a forward
+  move the developer can make in-app.
+- **Clarification round** — one completed turn of the `needs-clarification` loop: the questions the
+  agent asked paired with the developer's answers (`ClarificationRound`). Draft mode is one-shot
+  (no agent session memory), so the harness threads the oldest-first history of rounds back into
+  each re-draft to reconstruct continuity.
 - **Cascade** — when an earlier change invalidates later specs, whether the agent changing an
   earlier spec or the developer editing foundational code at a stop. v1 policy: **flag** the
   affected downstream specs and let the **developer choose** which to rerun — no magic-rewind,

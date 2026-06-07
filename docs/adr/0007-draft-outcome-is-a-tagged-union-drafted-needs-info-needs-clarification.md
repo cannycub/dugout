@@ -95,3 +95,12 @@ ADR-0006 repo-scope validation (every drafted spec targets a declared repo) unmi
   the *wire format* on that channel is a sentinel-delimited text block, not JSON — see **ADR-0009**.
   The kiro invocation is dependency-injected (as `JiraReadAdapter` injects `fetch`), so the whole
   adapter is tested through the port with the CLI faked.
+
+---
+
+**Updated 2026-06-07 (#21):** `DraftInput.priorClarifications` was renamed to `clarifications`
+when the answer→re-draft loop was wired end-to-end. The field carries the accumulated
+oldest-first `ClarificationRound[]`; the temporal qualifier was dropped because, at submit time,
+the rounds are the developer's *current* answers, not an archive (the "prior" framing was the
+draft engine's POV, not the head coach's). The decision in this ADR — the tagged union and
+harness-reconstructed continuity — is unchanged; only the field's spelling moved.
