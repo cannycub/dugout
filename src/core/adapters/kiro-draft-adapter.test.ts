@@ -199,7 +199,7 @@ describe("KiroDraftAdapter.draft", () => {
     await adapter.draft({
       ticket: TICKET,
       repos: [await declaredClone("web")],
-      priorClarifications: [
+      clarifications: [
         {
           answers: [
             { questionId: "q1", question: "Soft-delete or hard-delete?", answer: "Soft-delete only" },

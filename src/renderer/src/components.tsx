@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import type { Story, Spec } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
+import type { ClarifyingQuestion, ClarificationRound } from "../../core/ports/executor.js";
 import type { RepoMatch, CloneBinding } from "../../core/repo-scope.js";
 import type { ExecutorMode } from "../../shared/dugout-api.js";
 import { useDugout } from "./dugout-context.js";
@@ -341,14 +342,17 @@ function CloneBadge({ clone }: { clone: CloneBinding }) {
 export function DeclareRepos({
   onDeclare,
   busy,
+  initialSelected,
 }: {
   onDeclare: (names: string[]) => void;
   busy: boolean;
+  /** Repo names to pre-select (e.g. re-entering declare after a needs-info kickback). */
+  initialSelected?: string[];
 }) {
   const dugout = useDugout();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoMatch[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected ?? []));
   const [rescanning, setRescanning] = useState(false);
 
   useEffect(() => {
@@ -442,6 +446,179 @@ export function DeclareRepos({
           {busy ? "Working…" : `Declare ${selected.size || ""} & draft ▸`}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ── Mound visit: the clarification answer form (#21) ───────────────────────────────────── */
+
+interface AnswerFormProps {
+  /** The questions the agent is currently blocked on. */
+  questions: ClarifyingQuestion[];
+  /** Earlier answered rounds this loop, oldest-first (shown collapsed, read-only on round 2+). */
+  rounds: ClarificationRound[];
+  busy: boolean;
+  /** Hand the freshly-answered round up so the harness re-drafts with the full continuity. */
+  onSubmit: (answers: ClarificationRound["answers"]) => void;
+  /** Drop the in-memory rounds and walk off — the only exit besides convergence. */
+  onAbandon: () => void;
+  /** Pre-fill answers (by question id) — used to repopulate the form after a failed re-draft. */
+  initialAnswers?: Record<string, string>;
+}
+
+/**
+ * A mound visit: the agent can spec the play but won't guess (invariant 1), so it stops to ask the
+ * head coach. Every question must be answered before the re-draft is allowed; on round 2+ the
+ * earlier calls are kept collapsed and read-only above the new questions, and Abandon walks the
+ * loop off the field. Stateless — the growing rounds live in the App's view-state.
+ */
+export function AnswerForm({
+  questions,
+  rounds,
+  busy,
+  onSubmit,
+  onAbandon,
+  initialAnswers,
+}: AnswerFormProps) {
+  const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers ?? {});
+  const allAnswered = questions.every((q) => (answers[q.id] ?? "").trim().length > 0);
+
+  const submit = () => {
+    if (!allAnswered) return;
+    onSubmit(
+      questions.map((q) => ({
+        questionId: q.id,
+        question: q.prompt,
+        answer: (answers[q.id] ?? "").trim(),
+      })),
+    );
+    // No need to clear: submitting hands off to the waiting view, unmounting this form; if the
+    // re-draft asks again it remounts fresh, and a failed draft restores the form fresh too.
+  };
+
+  return (
+    <div className="field clarify-field">
+      <div className="field-head">
+        <span className="panel-eyebrow">Mound visit</span>
+        <span className="field-count">round {rounds.length + 1}</span>
+      </div>
+
+      <p className="clarify-note">
+        The agent can spec this play — but it won't guess. Answer{" "}
+        <strong>
+          {questions.length} {questions.length === 1 ? "question" : "questions"}
+        </strong>{" "}
+        and it re-drafts.
+      </p>
+
+      {rounds.length > 0 && (
+        <details className="clarify-prior">
+          <summary>
+            Earlier calls · {rounds.length} {rounds.length === 1 ? "round" : "rounds"}
+          </summary>
+          {rounds.map((round, ri) => (
+            <div className="prior-round" key={ri}>
+              <span className="prior-round-tag">round {ri + 1}</span>
+              {round.answers.map((a, ai) => (
+                <div className="prior-qa" key={ai}>
+                  <p className="prior-q">{a.question}</p>
+                  <p className="prior-a">{a.answer}</p>
+                </div>
+              ))}
+            </div>
+          ))}
+        </details>
+      )}
+
+      <div className="clarify-questions">
+        {questions.map((q, i) => (
+          <div className="clarify-q" key={q.id}>
+            <div className="clarify-q-head">
+              <span className="clarify-q-num">{i + 1}</span>
+              <span className="clarify-q-text">{q.prompt}</span>
+            </div>
+            <textarea
+              className="clarify-answer"
+              aria-label={q.prompt}
+              rows={2}
+              placeholder="Your call…"
+              value={answers[q.id] ?? ""}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="declare-actions">
+        <button type="button" className="back-btn" onClick={onAbandon}>
+          ◂ Abandon
+        </button>
+        <button
+          type="button"
+          className="call-btn clay declare-btn"
+          disabled={busy || !allAnswered}
+          onClick={submit}
+        >
+          {busy ? "Working…" : "Re-draft ▸"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── On the mound: the agent-is-drafting waiting view (#21) ──────────────────────────────── */
+
+interface DraftingViewProps {
+  /** The declared repos the agent is scouting (for context while it works). */
+  repos: string[];
+  /** A cold first draft vs. a re-draft folding in the dev's answers — shapes the copy. */
+  kind: "draft" | "redraft";
+  /** On a re-draft, which round is being drafted (1-based). */
+  round?: number;
+}
+
+/**
+ * Drafting is a real read-only agent run — slow on the live path. Rather than freeze the prior form
+ * (and, on a re-draft, blank out the just-typed answers), the loop hands off to this dedicated
+ * waiting view: floodlight rings pulse off the mound while the agent reads the play. Purely
+ * presentational; the App owns the in-flight `drafting` view-state and swaps it for the result.
+ */
+export function DraftingView({ repos, kind, round }: DraftingViewProps) {
+  const headline = kind === "redraft" ? "Reading your signs" : "Reading the play";
+  const sub =
+    kind === "redraft"
+      ? "Folding your answers back in and re-drafting the fan-out…"
+      : "Scouting the declared repos and drafting the fan-out…";
+  const eyebrow = kind === "redraft" ? `Re-draft · round ${round ?? 1}` : "On the mound";
+
+  return (
+    <div className="field drafting-field" role="status" aria-live="polite">
+      <div className="mound" aria-hidden="true">
+        <span className="mound-ring r1" />
+        <span className="mound-ring r2" />
+        <span className="mound-ring r3" />
+        <span className="mound-core" />
+      </div>
+      <motion.div
+        className="drafting-copy"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 240, damping: 26 }}
+      >
+        <span className="panel-eyebrow">{eyebrow}</span>
+        <h3 className="drafting-headline">{headline}</h3>
+        <p className="drafting-sub">{sub}</p>
+        {repos.length > 0 && (
+          <div className="drafting-repos">
+            {repos.map((r) => (
+              <span className="repo-chip" key={r}>
+                {r}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="drafting-hint">Read-only — the agent never touches your clones. A live run can take a moment.</p>
+      </motion.div>
     </div>
   );
 }

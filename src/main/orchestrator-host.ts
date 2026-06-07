@@ -20,6 +20,7 @@ import { SettingsStore } from "./settings-store.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
+import type { DraftOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
 
@@ -59,6 +60,22 @@ function workspaceRoots(): string[] {
   return raw ? raw.split(":").filter(Boolean) : [];
 }
 
+/**
+ * The fake executor's canned draft outcome(s). Normally the single seed fan-out. The e2e suite sets
+ * `DUGOUT_SEED_CLARIFY` to swap in a deterministic two-round sequence (ask → draft) so a full
+ * clarification loop can be driven through real Electron IPC against the fakes (#21) — the only
+ * fake-config seam the built app exposes. No effect on the shipped app (env unset).
+ */
+function fakeDraftSeed(): DraftOutcome | DraftOutcome[] {
+  if (process.env["DUGOUT_SEED_CLARIFY"]) {
+    return [
+      { result: "needs-clarification", questions: [{ id: "q1", prompt: "Soft-delete or hard-delete?" }] },
+      SEED_DRAFT,
+    ];
+  }
+  return SEED_DRAFT;
+}
+
 /** Runtime control over which executor backs drafting, persisting the choice across restarts. */
 export interface ExecutorModeControl {
   get(): ExecutorMode;
@@ -96,7 +113,12 @@ export async function createOrchestrator(
   // developer's persisted choice; switching persists the new choice (best-effort).
   const settings = new SettingsStore(join(userDataDir, "settings.json"));
   const executor = new SwitchableExecutor({
-    fake: new FakeExecutor({ draft: SEED_DRAFT }),
+    // The clarify demo seam also slows the fake draft so the waiting view is observable in the e2e
+    // (real drafting is slow; instant fakes would flash past it). No effect on the shipped app.
+    fake: new FakeExecutor({
+      draft: fakeDraftSeed(),
+      ...(process.env["DUGOUT_SEED_CLARIFY"] ? { draftDelayMs: 1200 } : {}),
+    }),
     live: new KiroDraftAdapter({
       workDir: join(userDataDir, "kiro-work"),
       runKiro: spawnKiroRunner(),

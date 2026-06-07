@@ -23,9 +23,16 @@ export interface HarnessOptions {
   /**
    * What the fake executor's draft() returns. The common case is a drafted fan-out, so a bare
    * `DraftedSpec[]` is wrapped as `{ result: "drafted", specs }`; pass a full {@link DraftOutcome}
-   * to exercise a `needs-info` / `needs-clarification` stop (ADR-0007).
+   * to exercise a `needs-info` / `needs-clarification` stop (ADR-0007). Omit when using
+   * {@link drafts} to drive a multi-round clarification loop.
    */
-  draft: DraftedSpec[] | DraftOutcome;
+  draft?: DraftedSpec[] | DraftOutcome;
+  /**
+   * A sequence of draft outcomes, consumed one per draft() call — to drive the clarification loop
+   * across rounds (e.g. round 1 `needs-clarification`, round 2 `drafted`). Mutually exclusive with
+   * {@link draft}.
+   */
+  drafts?: DraftOutcome[];
   /** Per-spec execute outcomes (specs not listed default to green). */
   execute?: Record<string, ExecuteOutcome>;
   /** Run-state store override; defaults to a fresh in-memory store. */
@@ -37,9 +44,17 @@ export interface HarnessOptions {
 /** Builds an Orchestrator wired to all five fake ports + both stores, exposed for assertions. */
 export function makeHarness(options: HarnessOptions) {
   const jira = new FakeJira({ tickets: options.tickets ?? [DEFAULT_TICKET] });
-  const draft: DraftOutcome = Array.isArray(options.draft)
-    ? { result: "drafted", specs: options.draft }
-    : options.draft;
+  if (options.draft !== undefined && options.drafts !== undefined) {
+    throw new Error("makeHarness: pass either `draft` or `drafts`, not both");
+  }
+  if (options.draft === undefined && options.drafts === undefined) {
+    throw new Error("makeHarness: one of `draft` or `drafts` is required");
+  }
+  const draft: DraftOutcome | DraftOutcome[] = options.drafts
+    ? options.drafts
+    : Array.isArray(options.draft)
+      ? { result: "drafted", specs: options.draft }
+      : options.draft!;
   const executor = new FakeExecutor({
     draft,
     ...(options.execute ? { execute: options.execute } : {}),

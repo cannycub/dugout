@@ -14,12 +14,13 @@ export interface DraftInput {
   /** Repos declared in scope by the developer, bound to local clones (ADR-0006). */
   repos: DeclaredRepo[];
   /**
-   * Prior clarification rounds, oldest-first (ADR-0007). Absent on the first attempt. kiro is
-   * one-shot with no session memory, so the harness reconstructs continuity here: the adapter
-   * folds these question/answer rounds back into the freshly-assembled prompt so a re-draft
-   * converges. The port stays a pure function of its input.
+   * The developer's answered clarification rounds, oldest-first (ADR-0007). Absent on the first
+   * attempt. Named for the head coach's POV at submit time — these are their *current* answers fed
+   * back in, not an archive. kiro is one-shot with no session memory, so the harness reconstructs
+   * continuity here: the adapter folds these question/answer rounds back into the freshly-assembled
+   * prompt so a re-draft converges. The port stays a pure function of its input.
    */
-  priorClarifications?: ClarificationRound[];
+  clarifications?: ClarificationRound[];
 }
 
 /**

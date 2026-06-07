@@ -5,6 +5,7 @@ import { Orchestrator } from "../core/orchestrator.js";
 import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
 import type { DeclaredRepo } from "../core/repo-scope.js";
+import type { ClarificationRound } from "../core/ports/executor.js";
 import type { ExecutorMode } from "../core/switchable-executor.js";
 import { createOrchestrator, broadcast, type ExecutorModeControl } from "./orchestrator-host.js";
 
@@ -48,12 +49,18 @@ function registerIpc(orchestrator: Orchestrator, modeControl: ExecutorModeContro
 
   ipcMain.handle(CHANNELS.getStory, (_e, key: string) => orchestrator.getStory(key) ?? null);
 
-  ipcMain.handle(CHANNELS.draft, async (_e, key: string, repos: DeclaredRepo[]) => {
-    const result = await orchestrator.draftStory(key, { repos });
-    // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
-    if (result.outcome === "drafted") afterTransition(key, result.story.status);
-    return result;
-  });
+  ipcMain.handle(
+    CHANNELS.draft,
+    async (_e, key: string, repos: DeclaredRepo[], clarifications?: ClarificationRound[]) => {
+      const result = await orchestrator.draftStory(key, {
+        repos,
+        ...(clarifications ? { clarifications } : {}),
+      });
+      // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
+      if (result.outcome === "drafted") afterTransition(key, result.story.status);
+      return result;
+    },
+  );
 
   ipcMain.handle(CHANNELS.searchRepos, (_e, query: string) => orchestrator.searchRepos(query));
   ipcMain.handle(CHANNELS.declareRepos, (_e, names: string[]) => orchestrator.declareRepos(names));

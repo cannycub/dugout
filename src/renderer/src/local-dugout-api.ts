@@ -15,7 +15,16 @@ import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
 export interface LocalSeed {
   /** The developer's assigned tickets (their roster). */
   tickets: Ticket[];
-  draft: DraftOutcome;
+  /**
+   * The fake draft outcome(s). A single {@link DraftOutcome} is returned for every draft() call; an
+   * array is consumed in order to drive a clarification loop. Omit when supplying {@link executor}.
+   */
+  draft?: DraftOutcome | DraftOutcome[];
+  /**
+   * An explicit executor, used as the fake-mode backend instead of building one from {@link draft}.
+   * Lets a test inject a {@link FakeExecutor} and assert on its recorded `draftCalls`.
+   */
+  executor?: ExecutorPort;
   /** Catalog + clone discovery backing the declare-repos step (ADR-0006). */
   repoScope: RepoScope;
 }
@@ -47,7 +56,7 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     },
   };
   const executor = new SwitchableExecutor({
-    fake: new FakeExecutor({ draft: seed.draft }),
+    fake: seed.executor ?? new FakeExecutor({ draft: seed.draft ?? { result: "drafted", specs: [] } }),
     live: liveUnavailable,
     mode: "fakes",
   });
@@ -73,8 +82,11 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
   return {
     listTickets: () => orchestrator.listAssignedTickets(),
     getStory: async (key) => orchestrator.getStory(key) ?? null,
-    draft: async (key, repos) => {
-      const result = await orchestrator.draftStory(key, { repos });
+    draft: async (key, repos, clarifications) => {
+      const result = await orchestrator.draftStory(key, {
+        repos,
+        ...(clarifications ? { clarifications } : {}),
+      });
       // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
       if (result.outcome === "drafted") afterTransition(result.story);
       return result;

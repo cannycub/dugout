@@ -14,6 +14,7 @@
     "start": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:agent": "vitest run --config vitest.agent.config.ts",
     "test:e2e": "electron-vite build && playwright test",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
