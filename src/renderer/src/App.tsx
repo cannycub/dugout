@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Story } from "../../core/domain.js";
 import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
@@ -28,13 +28,18 @@ import {
  */
 type View =
   | { type: "roster" }
-  | { type: "declaring"; ticket: Ticket }
+  // `repos` carries any already-declared repos back into the declare step (e.g. after a needs-info
+  // kickback) so the developer doesn't re-pick them; absent on the first visit.
+  | { type: "declaring"; ticket: Ticket; repos?: DeclaredRepo[] }
   | {
       type: "clarifying";
       ticket: Ticket;
       repos: DeclaredRepo[];
       questions: ClarifyingQuestion[];
       rounds: ClarificationRound[];
+      // The just-typed answers, repopulated when a re-draft fails so they aren't lost; absent on a
+      // fresh round.
+      draftAnswers?: Record<string, string>;
     }
   // The agent is drafting (a slow read-only run) — a dedicated waiting phase so the prior form
   // isn't frozen and a re-draft doesn't strand the just-typed answers. `kind` shapes the copy;
@@ -91,13 +96,19 @@ export function App() {
     setError(null);
   };
 
+  // The most recently selected ticket; an in-flight getStory only applies its result if its key is
+  // still the latest selection, so a slow resolve can't clobber a newer pick (out-of-order guard).
+  const selectionRef = useRef<string | null>(null);
+
   // Selecting a play loads any existing run-state for it (a parked story re-opens); otherwise the
   // developer starts at declaring repos.
   const onSelect = (key: string) => {
     const ticket = tickets.find((t) => t.key === key);
     if (!ticket) return;
+    selectionRef.current = key;
     void guard(async () => {
       const existing = await dugout.getStory(key);
+      if (selectionRef.current !== key) return; // a newer selection superseded this one
       setView(existing ? { type: "story", story: existing } : { type: "declaring", ticket });
     });
   };
@@ -116,7 +127,9 @@ export function App() {
     if (result.outcome === "drafted") {
       setView({ type: "story", story: result.story });
     } else if (result.outcome === "needs-info") {
-      setView({ type: "declaring", ticket });
+      // Terminal to Jira: drop the rounds but keep the declared repos so a retry (after editing the
+      // ticket) doesn't force re-declaring them.
+      setView({ type: "declaring", ticket, ...(repos.length ? { repos } : {}) });
       setError(`Ticket needs more info: ${result.reason}`);
     } else {
       setView({ type: "clarifying", ticket, repos, questions: result.questions, rounds });
@@ -135,7 +148,9 @@ export function App() {
         const result = await dugout.draft(ticket.key, repos);
         applyDraftResult(result, ticket, repos, []);
       } catch (err) {
-        setView({ type: "declaring", ticket }); // restore so the error banner has its context
+        // Restore declaring with the repos still selected so the error banner has context and the
+        // dev needn't re-pick them.
+        setView({ type: "declaring", ticket, ...(repos.length ? { repos } : {}) });
         throw err;
       }
     });
@@ -152,8 +167,10 @@ export function App() {
         const result = await dugout.draft(ticket.key, repos, rounds);
         applyDraftResult(result, ticket, repos, rounds);
       } catch (err) {
-        // Restore the clarifying view (with the original questions) so the dev can retry.
-        setView({ type: "clarifying", ticket, repos, questions, rounds: prior });
+        // Restore the clarifying view with the original questions AND the just-typed answers so a
+        // transient draft failure doesn't make the dev retype them.
+        const draftAnswers = Object.fromEntries(answers.map((a) => [a.questionId, a.answer]));
+        setView({ type: "clarifying", ticket, repos, questions, rounds: prior, draftAnswers });
         throw err;
       }
     });
@@ -187,7 +204,9 @@ export function App() {
       ? view.story.declaredRepos
       : view.type === "clarifying" || view.type === "drafting"
         ? view.repos.map((r) => r.identity.name)
-        : [];
+        : view.type === "declaring"
+          ? (view.repos ?? []).map((r) => r.identity.name)
+          : [];
 
   return (
     <div className="app">
@@ -240,6 +259,7 @@ export function App() {
                 busy={busy}
                 onSubmit={onAnswer}
                 onAbandon={backToRoster}
+                {...(view.draftAnswers ? { initialAnswers: view.draftAnswers } : {})}
               />
             ) : view.type === "drafting" ? (
               <DraftingView
@@ -248,7 +268,11 @@ export function App() {
                 {...(view.kind === "redraft" ? { round: view.rounds.length } : {})}
               />
             ) : (
-              <DeclareRepos onDeclare={onDeclareAndDraft} busy={busy} />
+              <DeclareRepos
+                onDeclare={onDeclareAndDraft}
+                busy={busy}
+                {...(view.repos ? { initialSelected: view.repos.map((r) => r.identity.name) } : {})}
+              />
             )}
           </div>
         </main>

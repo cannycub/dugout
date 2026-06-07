@@ -342,14 +342,17 @@ function CloneBadge({ clone }: { clone: CloneBinding }) {
 export function DeclareRepos({
   onDeclare,
   busy,
+  initialSelected,
 }: {
   onDeclare: (names: string[]) => void;
   busy: boolean;
+  /** Repo names to pre-select (e.g. re-entering declare after a needs-info kickback). */
+  initialSelected?: string[];
 }) {
   const dugout = useDugout();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoMatch[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected ?? []));
   const [rescanning, setRescanning] = useState(false);
 
   useEffect(() => {
@@ -459,6 +462,8 @@ interface AnswerFormProps {
   onSubmit: (answers: ClarificationRound["answers"]) => void;
   /** Drop the in-memory rounds and walk off — the only exit besides convergence. */
   onAbandon: () => void;
+  /** Pre-fill answers (by question id) — used to repopulate the form after a failed re-draft. */
+  initialAnswers?: Record<string, string>;
 }
 
 /**
@@ -467,8 +472,15 @@ interface AnswerFormProps {
  * earlier calls are kept collapsed and read-only above the new questions, and Abandon walks the
  * loop off the field. Stateless — the growing rounds live in the App's view-state.
  */
-export function AnswerForm({ questions, rounds, busy, onSubmit, onAbandon }: AnswerFormProps) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+export function AnswerForm({
+  questions,
+  rounds,
+  busy,
+  onSubmit,
+  onAbandon,
+  initialAnswers,
+}: AnswerFormProps) {
+  const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers ?? {});
   const allAnswered = questions.every((q) => (answers[q.id] ?? "").trim().length > 0);
 
   const submit = () => {
