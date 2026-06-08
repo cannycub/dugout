@@ -32,8 +32,19 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   (v1.5+).
 - **Draft mode** — executor invocation that reads ticket + code (read-only, **no sandbox**) and
   emits spec markdown. Used for spec generation and the whole review loop.
-- **Execute mode** — executor invocation that builds code inside an isolated Sand Castle Docker
-  sandbox (read-write), emits code + commits.
+- **Execute mode** — executor invocation that builds code inside an isolated Sand Castle sandbox
+  (read-write), following red→green TDD, and emits code + commits. Produces an **Execute outcome**.
+- **Sand Castle** — the external, provider-agnostic sandbox orchestrator Dugout wraps to run execute
+  mode. It owns the sandbox lifecycle and returns the agent's branch (merged back to the local
+  clone); the sandbox **backend** (Docker in v1; Podman/Vercel/custom possible) is a Sand Castle
+  *provider*, not a Dugout concern. Dugout owns only spec **grading** (the **Execute outcome**).
+- **Execute outcome** — the result of an execute-mode run for one spec, one of three:
+  `green` (the per-spec green gate is met — invariant 8), `ambiguous` (the agent hit a fork it
+  cannot resolve without guessing and refuses to proceed — the build-time analogue of
+  `needs-clarification`; the developer re-clarifies, then the spec clean-restarts), or `red` (the
+  agent completed *without* ambiguity but the green gate is not met — nothing to clarify; retry or
+  investigate, then clean-restart). Any non-green outcome fails the spec and the story for a **clean
+  restart**, never a resume (invariant 1).
 - **Story branch** — the per-repo branch onto which green spec branches accumulate locally.
   Stays local until a single end-of-story push.
 - **Catalog** — the team-wide list of known repo identities (name + canonical remote). The

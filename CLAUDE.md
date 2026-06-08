@@ -55,3 +55,5 @@ Three tiers. Put each piece of behaviour at the lowest tier that can actually pr
    the default `npm test`/CI (a vitest `exclude`), not gated by a runtime flag — a flag silently
    skips and reports green, giving false confidence the agent was tested. They consume
    `KIRO_API_KEY` (and optional `KIRO_BIN`) as inputs and **fail loudly** if absent — never skip.
+   **Execute-mode** agent tests additionally require a reachable **Docker** daemon and a Sand Castle
+   sandbox image (real `sandcastle.run()`); a missing prerequisite **fails loudly**, never skips.

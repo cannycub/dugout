@@ -1,6 +1,7 @@
 # Execute mode — design (#7)
 
-**Status:** approved design, pre-implementation. **Scope:** issue #7 (single-spec execute mode).
+**Status:** approved design, grilled against CONTEXT.md/ADRs, pre-implementation. See **ADR-0011**.
+**Scope:** issue #7 (single-spec execute mode).
 **Out of scope:** #8 (story-branch accumulation / stacking / cross-repo parallelism). The fan-out
 (story → spec set) already exists in draft mode and is untouched here.
 
@@ -43,9 +44,29 @@ stdin? }` (the headless-kiro invocation we already have in `kiro-runner.ts`) + `
 → events` (kiro stdout is plain text → near-trivial; `captureSessions: false`). The expensive part
 (harness) is Sandcastle's; the part we write (provider) is small.
 
-Rationale and the considered alternatives (homegrown thin adapter; built-in Claude Code for execute)
-are recorded in **ADR-0011** (written at implementation time). Sand Castle was already a CONTEXT.md
-commitment; this affirms and details it.
+Rationale and the considered alternatives (homegrown thin adapter; built-in Claude Code for execute;
+binary outcome) are recorded in **ADR-0011**. Sand Castle was already a CONTEXT.md commitment; this
+affirms and details it.
+
+### Outcome contract (grilled)
+
+`ExecutorPort.execute()` returns `ExecuteOutcome = green | ambiguous | red` (the `red` arm is new —
+ADR-0011, glossary term **Execute outcome**):
+
+- `green { branch }` — the per-spec green gate is met (invariant 8).
+- `ambiguous { reason }` — kiro hit a fork it cannot resolve without guessing and refused to proceed
+  (build-time analogue of `needs-clarification`); the developer re-clarifies, then the spec
+  clean-restarts.
+- `red { reason }` — kiro completed *without* ambiguity but the green gate is not met (or the test
+  report is missing/unparseable — `reason` notes it); nothing to clarify, retry/investigate.
+
+Both non-green arms fail the spec + story for a **clean restart** (invariant 1); the orchestrator's
+existing `result !== "green"` branch is unchanged.
+
+**Replay specs are not special-cased.** Every spec is built and graded identically (invariant 8). A
+replay spec's true verification is the replay — an additional human gate reached via `review-required`
+(default-on for replay specs), performed manually outside Dugout in v1. A replay spec may add few/no
+new tests, so for it `green` degrades to "the full suite still passes (no regressions)."
 
 ## Components
 
@@ -54,7 +75,7 @@ commitment; this affirms and details it.
 | `core/adapters/kiro-execute-adapter.ts` | implements `ExecutorPort.execute()`: build the `run()` config, invoke the injected `run`, grade the result → `ExecuteOutcome` |
 | `core/adapters/kiro-agent-provider.ts` | a Sandcastle `AgentProvider` for headless kiro (`buildPrintCommand` + `parseStreamLine`), modelled on the `codex`/`opencode` built-ins |
 | `core/adapters/execute-methodology.ts` | the red→green TDD prompt; instructs kiro to run the full suite and emit a `<dugout-test-report>` block + the completion signal |
-| `core/grade-execute.ts` | **pure** grading: `(baselineReds, afterReport) → "green" \| { ambiguous, reason }`. The high-value unit-test target |
+| `core/grade-execute.ts` | **pure** grading: `(baselineReds, afterReport) → green \| red`. The high-value unit-test target (`ambiguous` is decided before grading — see flow) |
 
 **Test seam:** the `run` function (type = Sandcastle's `run`) is **injected** into
 `kiro-execute-adapter`, exactly as `runKiro` is injected into `kiro-draft-adapter` today. Unit tests
@@ -63,16 +84,26 @@ The Docker/Vercel/custom **provider is config**, not our code.
 
 ## Execute flow (single spec)
 
-1. **Baseline** — run the full suite on the seeded story-branch HEAD and capture the **failing-test
-   set** (pre-existing reds). Captured once per story; for #7's single spec, just before the run.
+Grading runs **in the sandbox** (invariant 8). The harness grades — kiro never self-reports green.
+
+1. **Baseline** — run the full suite *in the sandbox* on the seed and capture the **failing-test
+   set** (pre-existing reds). Seed = the branch `execute()` is handed; for #7's single spec that is
+   the base / story-branch HEAD (they coincide before any accumulation). Captured just before build.
 2. **Build** — `run({ agent: kiroAgent, sandbox: <provider>, cwd: clonePath,
    prompt: methodology(spec), branchStrategy: { type: "branch", branch: specBranch },
    completionSignal, output: Output.object({ tag: "dugout-test-report", schema }) })`. kiro does
-   red→green inside the box; commits land on `specBranch` and merge back to the host clone.
-3. **Grade (pure)** — `green` iff `afterReport.failures \ baselineReds === ∅` (full suite passes,
-   pre-existing reds baselined). Otherwise → `ambiguous`.
-4. **Outcome** — `{ result: "green", branch: result.branch }` or `{ result: "ambiguous", reason }`.
-   The orchestrator already treats non-green as fail + clean restart; nothing leaks downstream.
+   red→green inside the box `--no-interactive`; commits land on `specBranch` and merge back to the
+   host clone (Sandcastle's job).
+3. **Decide the outcome:**
+   - kiro emitted the **ambiguity marker** → `ambiguous { reason }` (short-circuit; no grading).
+   - else **grade (pure)**: `green` iff `afterReport.failures \ baselineReds === ∅`; else `red`
+     (suite not green, or report missing/unparseable — `reason` notes it).
+   - **operational failure** (sandbox won't start, kiro crash/timeout, Docker absent) → **throw**
+     (an environment error, not a restartable spec outcome).
+4. **Outcome** → `{ result: "green", branch } | { result: "ambiguous", reason } | { result: "red",
+   reason }`. The orchestrator treats any non-green as fail + clean restart; nothing leaks
+   downstream. `merge()` stays a no-op in #7 — a green single-spec story reaches `dev-complete` with
+   its one branch sitting un-accumulated on the host clone (story-branch accumulation is #8).
 
 ## Acceptance-criteria mapping (issue #7)
 
@@ -94,7 +125,8 @@ The Docker/Vercel/custom **provider is config**, not our code.
 - **Agent integration** — `kiro-execute-adapter.agent.test.ts`: a real `sandcastle.run()` against
   Docker with real kiro on a throwaway repo + spec; proves kiro builds → commits → merges back and
   the suite goes green. **Not in CI** (slow/billable/non-deterministic); runnable via
-  `npm run test:agent`; consumes `KIRO_API_KEY`; fails loudly if absent.
+  `npm run test:agent`. Prerequisites: `KIRO_API_KEY` **and** a reachable **Docker** daemon **and**
+  the Sand Castle sandbox image — a missing prerequisite **fails loudly**, never skips (CLAUDE.md).
 - **e2e** — unaffected (stays on the fakes; `execute` remains fake in the fakes path).
 
 ## New dependency
