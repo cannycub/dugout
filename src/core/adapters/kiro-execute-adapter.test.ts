@@ -20,6 +20,9 @@ const deps = (run: SandcastleRun) => ({
   sandbox: { __fake: "sandbox" } as any,
   makeAgent: () => ({ name: "kiro" }) as any,
   resolveClonePath: async (_repo: string) => "/ws/api",
+  // Inject the key so the unit tier is hermetic (runs through fakes with no secret in the env) —
+  // the default `npm test`/CI must not require KIRO_API_KEY (CLAUDE.md testing pyramid).
+  apiKey: "k-test",
 });
 
 /** kiro prints the report INTO stdout (we don't use Sandcastle's Output extraction — spike note). */

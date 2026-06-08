@@ -66,7 +66,13 @@ export interface ExecuteInput {
   specId: string;
   repo: string;
   markdown: string;
-  /** The per-repo story-branch HEAD the sandbox is seeded from. */
+  /**
+   * The per-repo story branch this spec belongs to (`dugout/<key>/<repo>`). It is the *intended*
+   * base the sandbox seeds from — but in v1 that branch is not yet materialised (the orchestrator's
+   * `merge()` is a stub; story-branch creation + accumulation are #8), so the adapter currently seeds
+   * from the clone HEAD and uses this only to namespace the produced branch. Seeding from the
+   * story-branch HEAD is tracked in the execute-branch-model follow-up (#34).
+   */
   storyBranch: string;
 }
 
