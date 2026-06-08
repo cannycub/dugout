@@ -78,6 +78,6 @@ export function spawnKiroRunner(opts: SpawnKiroOptions = {}): KiroRun {
  */
 // eslint-disable-next-line no-control-regex
 const ANSI = new RegExp("\\u001B(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\u0007\\u001B]*(?:\\u0007|\\u001B\\\\))", "g");
-function stripAnsi(s: string): string {
+export function stripAnsi(s: string): string {
   return s.replace(ANSI, "");
 }

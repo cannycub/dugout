@@ -64,6 +64,57 @@ describe("KiroExecuteAdapter", () => {
     expect(out.result === "red" && out.reason).toMatch(/report/i);
   });
 
+  it("grades green when the report JSON carries ANSI escapes (kiro emits them even with NO_COLOR)", async () => {
+    // kiro still emits ANSI when piped (#8352); the draft path strips it, the execute path must too.
+    const body = JSON.stringify({ baselineFailures: ["x"], afterFailures: ["x"] });
+    const stdout = `building...\n<${TEST_REPORT_TAG}>[32m${body}[0m</${TEST_REPORT_TAG}>\n`;
+    const { run } = fakeRun({ branch: "b", commits: [], stdout });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "b" });
+  });
+
+  it("grades green when the report JSON is wrapped in a ```json code fence", async () => {
+    const body = JSON.stringify({ baselineFailures: [], afterFailures: [] });
+    const stdout = `<${TEST_REPORT_TAG}>\`\`\`json\n${body}\n\`\`\`</${TEST_REPORT_TAG}>`;
+    const { run } = fakeRun({ branch: "b", commits: [], stdout });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "b" });
+  });
+
+  it("uses the LAST valid report when kiro echoed the prompt's template earlier", async () => {
+    // The methodology prompt embeds a literal <dugout-test-report>{...[...]...}</…> template; if kiro
+    // narrates it before emitting the real report, the real (last, valid) one must win.
+    const echoed = `<${TEST_REPORT_TAG}>{"baselineFailures":[...],"afterFailures":[...]}</${TEST_REPORT_TAG}>`;
+    const real = `<${TEST_REPORT_TAG}>${JSON.stringify({ baselineFailures: [], afterFailures: ["c"] })}</${TEST_REPORT_TAG}>`;
+    const { run } = fakeRun({ branch: "b", commits: [], stdout: `${echoed}\n...work...\n${real}\n` });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out.result).toBe("red");
+    expect(out.result === "red" && out.reason).toMatch(/c/);
+  });
+
+  it("grades the report even when an ambiguity tag is also present (report-first: kiro proceeded)", async () => {
+    const body = JSON.stringify({ baselineFailures: [], afterFailures: [] });
+    const stdout = `<${AMBIGUITY_TAG}>echoed instruction</${AMBIGUITY_TAG}>\n<${TEST_REPORT_TAG}>${body}</${TEST_REPORT_TAG}>`;
+    const { run } = fakeRun({ branch: "b", commits: [], stdout });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "b" });
+  });
+
+  it("treats a present-but-empty ambiguity tag as ambiguous (with a fallback reason), not red", async () => {
+    const { run } = fakeRun({ branch: "b", commits: [], stdout: `<${AMBIGUITY_TAG}></${AMBIGUITY_TAG}>\n` });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out.result).toBe("ambiguous");
+    expect(out.result === "ambiguous" && out.reason.length).toBeGreaterThan(0);
+  });
+
+  it("grades red when a report failure id is not a string", async () => {
+    const stdout = `<${TEST_REPORT_TAG}>{"baselineFailures":[],"afterFailures":[{"name":"t"}]}</${TEST_REPORT_TAG}>`;
+    const { run } = fakeRun({ branch: "b", commits: [], stdout });
+    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+    expect(out.result).toBe("red");
+    expect(out.result === "red" && out.reason).toMatch(/report/i);
+  });
+
   it("rethrows operational failures (run() throws) — not a spec outcome", async () => {
     const run = (async () => {
       throw new Error("docker daemon not reachable");
