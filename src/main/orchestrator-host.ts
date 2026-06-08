@@ -19,6 +19,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { KiroExecuteAdapter } from "../core/adapters/kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
+import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
@@ -105,6 +106,15 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     new GitWorkspace({ roots: workspaceRoots() }),
   );
 
+  // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
+  // main process — both kiro adapters take it explicitly rather than reading process.env lazily, so a
+  // GUI-launched app (which doesn't inherit a shell's exports) can still reach kiro. undefined ⇒ the
+  // adapters fall back to their own process.env read and fail loudly if it's absent too.
+  const kiroApiKey =
+    (await new KiroCredentialStore(join(userDataDir, "kiro.cred"), safeStorage).load()) ??
+    kiroApiKeyFromEnv() ??
+    undefined;
+
   // Draft executor: real kiro by default; `DUGOUT_EXECUTOR=fakes` selects the in-memory fakes
   // (dev/test seam, ADR-0010). The clarify demo seam also slows the fake draft so the waiting view is
   // observable in the e2e (real drafting is slow; instant fakes would flash past it). No effect on the
@@ -115,7 +125,7 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
   });
   const kiro = new KiroDraftAdapter({
     workDir: join(userDataDir, "kiro-work"),
-    runKiro: spawnKiroRunner(),
+    runKiro: spawnKiroRunner(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
   const draftExecutor = process.env["DUGOUT_EXECUTOR"] === "fakes" ? fake : kiro;
 
@@ -142,6 +152,7 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
       }
       return declared.clone.path;
     },
+    ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
   const executor: ExecutorPort = {
     draft: (input) => draftExecutor.draft(input),
