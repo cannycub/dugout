@@ -125,7 +125,15 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
   // fakes. The `DUGOUT_EXECUTOR=fakes` path keeps execute fully fake (e2e never touches Docker/kiro).
   const kiroExecute = new KiroExecuteAdapter({
     run: sandcastleRun,
-    sandbox: docker({ imageName: process.env["DUGOUT_SANDBOX_IMAGE"] ?? "dugout-sandbox:local" }),
+    sandbox: docker({
+      imageName: process.env["DUGOUT_SANDBOX_IMAGE"] ?? "dugout-sandbox:local",
+      // Our image bakes the `agent` user at uid/gid 1000 (sandbox/Dockerfile). Pin the container to
+      // it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the image.
+      // Aligning bind-mount ownership across host OSes is part of the deferred image-distribution
+      // question (we can't rebuild per-machine yet; see README + onboarding #18).
+      containerUid: 1000,
+      containerGid: 1000,
+    }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
     resolveClonePath: async (repo) => {
       const [declared] = await repoScope.declare([repo]);

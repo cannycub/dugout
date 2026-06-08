@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -45,7 +45,11 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
       );
     });
     // A throwaway repo with one trivially-specifiable feature and an existing node:test runner.
-    clone = await mkdtemp(join(tmpdir(), "dugout-exec-"));
+    // realpath() is essential on macOS: tmpdir() is under /var (a symlink to /private/var), but git
+    // records the worktree's gitdir as the canonical /private/var path. Sand Castle bind-mounts the
+    // git dir at the path we hand it, so a non-canonical path leaves the in-container gitdir
+    // reference unmounted ("not a git repository"). Pass the resolved path so the mounts line up.
+    clone = await realpath(await mkdtemp(join(tmpdir(), "dugout-exec-")));
     await sh("git", ["init", "-q"], { cwd: clone });
     await writeFile(
       join(clone, "package.json"),
@@ -62,7 +66,9 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
   it("builds a spec red→green and grades it green, producing a branch", async () => {
     const adapter = new KiroExecuteAdapter({
       run: sandcastleRun,
-      sandbox: docker({ imageName: "dugout-sandbox:local" }),
+      // containerUid/Gid pinned to the image's baked `agent` uid (sandbox/Dockerfile), matching the
+      // live wiring — Sand Castle's UID preflight otherwise expects the host uid and rejects.
+      sandbox: docker({ imageName: "dugout-sandbox:local", containerUid: 1000, containerGid: 1000 }),
       makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
       resolveClonePath: async () => clone,
     });
