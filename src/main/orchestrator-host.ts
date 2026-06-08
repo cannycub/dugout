@@ -14,13 +14,11 @@ import { GitWorkspace } from "../core/adapters/git-workspace.js";
 import { JiraReadAdapter } from "../core/adapters/jira-read-adapter.js";
 import { KiroDraftAdapter } from "../core/adapters/kiro-draft-adapter.js";
 import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
-import { SwitchableExecutor, type ExecutorMode } from "../core/switchable-executor.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
-import { SettingsStore } from "./settings-store.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
-import type { DraftOutcome } from "../core/ports/executor.js";
+import type { DraftOutcome, ExecutorPort } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
 
@@ -76,24 +74,18 @@ function fakeDraftSeed(): DraftOutcome | DraftOutcome[] {
   return SEED_DRAFT;
 }
 
-/** Runtime control over which executor backs drafting, persisting the choice across restarts. */
-export interface ExecutorModeControl {
-  get(): ExecutorMode;
-  set(mode: ExecutorMode): void;
-}
-
 /**
- * Wires the orchestrator. Drafting runs through a {@link SwitchableExecutor}: the developer flips it
- * from the UI between the in-memory fakes and the real (kiro) live path; execute mode stays fake
- * (no sandbox adapter yet). The repo-scope seam is real (GitHub-org catalog — still seeded via
+ * Wires the orchestrator. The shipped app is **always live**: drafting runs the real (kiro)
+ * adapter. Setting `DUGOUT_EXECUTOR=fakes` selects the in-memory fakes instead — a dev/test wiring
+ * seam fixed at startup (ADR-0010), consistent with the `DUGOUT_SEED_CLARIFY` / `DUGOUT_JIRA_*`
+ * stopgaps; there is no runtime toggle. Either way `execute` stays fake — no sandbox/execute adapter
+ * yet (later slice, #7). The repo-scope seam is real (GitHub-org catalog — still seeded via
  * FakeGitHub until a real list adapter lands — + local clone discovery). Jira is the real API-token
  * adapter when the developer has saved credentials (ADR-0005) or set the `DUGOUT_JIRA_*` env vars (a
  * stopgap until the settings UI #17 lands); otherwise the seed fake keeps dev/test working without
  * live Jira.
  */
-export async function createOrchestrator(
-  userDataDir: string,
-): Promise<{ orchestrator: Orchestrator; modeControl: ExecutorModeControl }> {
+export async function createOrchestrator(userDataDir: string): Promise<Orchestrator> {
   const github = new FakeGitHub(SEED_CATALOG);
 
   // Live Jira when the developer has saved credentials (ADR-0005); else the env-var stopgap (until
@@ -109,32 +101,22 @@ export async function createOrchestrator(
     new GitWorkspace({ roots: workspaceRoots() }),
   );
 
-  // Draft executor is switchable: fakes (seed) ↔ live (real kiro, read-only). Initial mode is the
-  // developer's persisted choice; switching persists the new choice (best-effort).
-  const settings = new SettingsStore(join(userDataDir, "settings.json"));
-  const executor = new SwitchableExecutor({
-    // The clarify demo seam also slows the fake draft so the waiting view is observable in the e2e
-    // (real drafting is slow; instant fakes would flash past it). No effect on the shipped app.
-    fake: new FakeExecutor({
-      draft: fakeDraftSeed(),
-      ...(process.env["DUGOUT_SEED_CLARIFY"] ? { draftDelayMs: 1200 } : {}),
-    }),
-    live: new KiroDraftAdapter({
-      workDir: join(userDataDir, "kiro-work"),
-      runKiro: spawnKiroRunner(),
-    }),
-    mode: settings.load().executorMode,
+  // Draft executor: real kiro by default; `DUGOUT_EXECUTOR=fakes` selects the in-memory fakes
+  // (dev/test seam, ADR-0010). `execute` is always fake — no sandbox/execute adapter yet (#7).
+  // The clarify demo seam also slows the fake draft so the waiting view is observable in the e2e
+  // (real drafting is slow; instant fakes would flash past it). No effect on the shipped app.
+  const fake = new FakeExecutor({
+    draft: fakeDraftSeed(),
+    ...(process.env["DUGOUT_SEED_CLARIFY"] ? { draftDelayMs: 1200 } : {}),
   });
-  const modeControl: ExecutorModeControl = {
-    get: () => executor.getMode(),
-    set: (mode) => {
-      executor.setMode(mode);
-      try {
-        settings.save({ executorMode: mode });
-      } catch (err) {
-        console.warn(`[dugout] could not persist executor mode (non-blocking): ${String(err)}`);
-      }
-    },
+  const kiro = new KiroDraftAdapter({
+    workDir: join(userDataDir, "kiro-work"),
+    runKiro: spawnKiroRunner(),
+  });
+  const draftExecutor = process.env["DUGOUT_EXECUTOR"] === "fakes" ? fake : kiro;
+  const executor: ExecutorPort = {
+    draft: (input) => draftExecutor.draft(input),
+    execute: (input) => fake.execute(input),
   };
 
   const orchestrator = new Orchestrator({
@@ -147,7 +129,7 @@ export async function createOrchestrator(
     store: openRunStateStore(userDataDir),
     repoScope,
   });
-  return { orchestrator, modeControl };
+  return orchestrator;
 }
 
 export { broadcast };

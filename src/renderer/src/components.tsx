@@ -5,65 +5,8 @@ import type { Ticket } from "../../core/ports/jira.js";
 import type { PullRequest } from "../../core/ports/github.js";
 import type { ClarifyingQuestion, ClarificationRound } from "../../core/ports/executor.js";
 import type { RepoMatch, CloneBinding } from "../../core/repo-scope.js";
-import type { ExecutorMode } from "../../shared/dugout-api.js";
 import { useDugout } from "./dugout-context.js";
 import { SPEC_META, RIBBON_STAGES, stageIndex } from "./lifecycle.js";
-
-/* ── Draft executor selector: fakes ↔ live (real kiro), lives in the topbar ─────────────── */
-
-const MODE_SEGMENTS: Array<{ value: ExecutorMode; label: string; title: string }> = [
-  { value: "fakes", label: "FAKES", title: "Drafting uses in-memory fakes — no kiro" },
-  { value: "live", label: "LIVE", title: "Drafting runs the real kiro agent, read-only" },
-];
-
-/**
- * The topbar's status chip is also the control for which executor backs drafting. The dot is a
- * floodlight that shifts turf-green (fakes, local & safe) → amber (live, the real agent is hot).
- * Reads/writes the mode through the DugoutApi only (never Electron directly — ADR-0001).
- */
-export function ExecutorModeSelector() {
-  const dugout = useDugout();
-  const [mode, setMode] = useState<ExecutorMode | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void dugout.getExecutorMode().then((m) => {
-      if (active) setMode(m);
-    });
-    return () => {
-      active = false;
-    };
-  }, [dugout]);
-
-  if (!mode) return null;
-
-  const choose = (next: ExecutorMode) => {
-    if (next === mode) return;
-    setMode(next); // optimistic; the switch is best-effort and reflected immediately
-    void dugout.setExecutorMode(next);
-  };
-
-  return (
-    <div className="mode-switch" data-mode={mode} role="group" aria-label="Draft executor">
-      <span className="mode-dot" aria-hidden="true" />
-      <span className="mode-label">DRAFT</span>
-      <div className="mode-seg-group">
-        {MODE_SEGMENTS.map((seg) => (
-          <button
-            key={seg.value}
-            type="button"
-            className={`mode-seg ${mode === seg.value ? "active" : ""}`}
-            aria-pressed={mode === seg.value}
-            title={seg.title}
-            onClick={() => choose(seg.value)}
-          >
-            {seg.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* ── Status ribbon: the lifecycle base path ─────────────────────────────────────────────── */
 
