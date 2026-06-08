@@ -27,6 +27,11 @@ settles **how** execute mode is built (issue #7).
    signal, the harness runs the full suite *in the sandbox* and compares the failing set to a
    baseline captured on the seed. The grading is a **pure function** (`grade-execute.ts`), the
    highest-value unit-test target.
+   > **Amended by [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md).**
+   > Sand Castle 0.7 exposes no host-readable in-sandbox suite run (its hooks are fire-and-forget),
+   > so v1 ships the inverse of this clause: **kiro** runs the suite twice and self-reports both
+   > failing-id lists, and the harness only diffs them. "The harness runs the full suite" and "kiro
+   > never self-reports green" are deferred — see ADR-0012 for the integrity caveats and the path back.
 
 4. **The `ExecutorPort` outcome contract gains a third arm** — `ExecuteOutcome` becomes
    `green | ambiguous | red`:
@@ -78,3 +83,5 @@ spec N from the updated story-branch HEAD, same-repo-serial / cross-repo-paralle
   via `review-required` (manual, outside Dugout in v1). A replay spec may add few/no new tests, so
   for it `green` degrades to "the full suite still passes (no regressions)."
 - Replacing Sand Castle, or moving grading into the agent, would require a new ADR superseding this.
+  Moving grading into the agent is exactly what v1 did under the Sand Castle 0.7 constraint — recorded
+  in [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md), which amends §3.
