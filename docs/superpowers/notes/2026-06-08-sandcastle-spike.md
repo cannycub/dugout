@@ -83,7 +83,18 @@ baseline" alternative is **not supported** by 0.7.0.
 report stays." Grading remains harness-side and pure (invariant 8 satisfied: the harness, not kiro,
 decides green by diffing the two lists).
 
-### 3. Minor notes
+### 3. kiro prompt rides stdin with NO trailing `-` (Task 5) — verified against kiro-cli 2.6.0
+
+The plan's `buildPrintCommand` ends the command with ` -`. Verified locally (kiro-cli 2.6.0 is
+installed; `printf 'Reply with only PONG' | kiro-cli chat --no-interactive --wrap never --trust-tools=`
+returned `PONG`): `kiro chat` reads the prompt from **stdin when its positional `[INPUT]` is omitted**.
+A trailing `-` would be taken as a literal `INPUT="-"` and **suppress** stdin reading. So the command
+is `kiro-cli chat --no-interactive --wrap never --trust-tools=<tools>` with the prompt on
+`PrintCommand.stdin` and **no `-`**. (The plan's unit test doesn't assert the `-`, so it stays green.)
+Trust tools `fs_read,fs_write,execute_bash` are passed but the exact identifiers are only proven
+end-to-end by the Task 8 agent test.
+
+### 4. Minor notes
 
 - `dangerouslySkipPermissions` is supplied to `buildPrintCommand` by the framework (required field on
   `AgentCommandOptions`). The kiro provider ignores it and always passes `--trust-tools=…` because
