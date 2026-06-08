@@ -88,7 +88,6 @@ body {
 .topbar {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
   padding-top: 12px;
   -webkit-app-region: drag;
 }
@@ -126,71 +125,6 @@ body {
   letter-spacing: 0.04em;
   color: var(--chalk-faint);
   text-transform: lowercase;
-}
-/* Draft executor selector (topbar). Pill + segmented toggle; the dot is the floodlight that
-   shifts turf (fakes) → amber (live). no-drag so it stays clickable inside the draggable topbar. */
-.mode-switch {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: var(--chalk-dim);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 5px 6px 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.2);
-  -webkit-app-region: no-drag;
-}
-.mode-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--turf);
-  box-shadow: 0 0 10px var(--turf);
-  transition:
-    background 0.3s ease,
-    box-shadow 0.3s ease;
-}
-.mode-switch[data-mode="live"] .mode-dot {
-  background: var(--amber);
-  box-shadow: 0 0 12px var(--amber);
-}
-.mode-label {
-  color: var(--chalk-faint);
-  letter-spacing: 0.18em;
-}
-.mode-seg-group {
-  display: flex;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.mode-seg {
-  font: inherit;
-  letter-spacing: inherit;
-  color: var(--chalk-faint);
-  background: transparent;
-  border: 0;
-  padding: 3px 11px;
-  cursor: pointer;
-  transition:
-    color 0.18s ease,
-    background 0.18s ease;
-}
-.mode-seg:hover {
-  color: var(--chalk-dim);
-}
-.mode-seg.active {
-  color: var(--field-900);
-  font-weight: 600;
-}
-.mode-switch[data-mode="fakes"] .mode-seg.active {
-  background: var(--turf);
-}
-.mode-switch[data-mode="live"] .mode-seg.active {
-  background: var(--amber);
 }
 
 /* ── Ribbon (lifecycle base path) ───────────────────────────────────────────────────────── */

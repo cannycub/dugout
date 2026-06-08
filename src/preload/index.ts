@@ -19,8 +19,6 @@ const api: DugoutApi = {
   resume: (key) => ipcRenderer.invoke(CHANNELS.resume, key),
   restart: (key) => ipcRenderer.invoke(CHANNELS.restart, key),
   createPullRequests: (key) => ipcRenderer.invoke(CHANNELS.createPullRequests, key),
-  getExecutorMode: () => ipcRenderer.invoke(CHANNELS.getExecutorMode),
-  setExecutorMode: (mode) => ipcRenderer.invoke(CHANNELS.setExecutorMode, mode),
   onEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, payload: DugoutEvent) => listener(payload);
     ipcRenderer.on(CHANNELS.event, handler);

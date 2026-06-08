@@ -6,10 +6,10 @@ import { join } from "node:path";
 // End-to-end smoke: launch the REAL built app and drive the lifecycle through real IPC/preload.
 // This is the one thing the jsdom test can't cover — the Electron contextBridge boundary.
 //
-// Each launch gets a FRESH `--user-data-dir`: the e2e is deterministic against the fakes (testing
-// pyramid), so it must not inherit persisted run-state or a persisted executor mode — a leftover
-// `executorMode: "live"` would route draft() to real kiro and fail without a key. A clean dir
-// starts in the safe `fakes` default every run.
+// The e2e is deterministic against the fakes (testing pyramid), so every launch sets
+// `DUGOUT_EXECUTOR=fakes` explicitly — the shipped app now defaults to live (real kiro) drafting
+// (ADR-0010), which would fail here without a key. Each launch also gets a FRESH `--user-data-dir`
+// so it never inherits persisted run-state.
 let app: ElectronApplication;
 let win: Page;
 const tmpDirs: string[] = [];
@@ -21,7 +21,10 @@ async function freshUserDataDir(): Promise<string> {
 }
 
 test.beforeAll(async () => {
-  app = await electron.launch({ args: [".", `--user-data-dir=${await freshUserDataDir()}`] });
+  app = await electron.launch({
+    args: [".", `--user-data-dir=${await freshUserDataDir()}`],
+    env: { ...process.env, DUGOUT_EXECUTOR: "fakes" },
+  });
   win = await app.firstWindow();
 });
 
@@ -63,7 +66,7 @@ test("clarification loop: needs-clarification → answer → re-draft converges 
   // A second app instance seeded (env) with a two-round sequence so the loop is deterministic.
   const clarApp = await electron.launch({
     args: [".", `--user-data-dir=${await freshUserDataDir()}`],
-    env: { ...process.env, DUGOUT_SEED_CLARIFY: "1" },
+    env: { ...process.env, DUGOUT_EXECUTOR: "fakes", DUGOUT_SEED_CLARIFY: "1" },
   });
   const clar = await clarApp.firstWindow();
   try {

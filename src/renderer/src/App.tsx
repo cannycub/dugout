@@ -16,7 +16,6 @@ import {
   PrBanner,
   TicketRoster,
   DeclareRepos,
-  ExecutorModeSelector,
 } from "./components.js";
 
 /**
@@ -215,7 +214,6 @@ export function App() {
           <span className="wordmark">DUGOUT</span>
           <span className="tagline">the head coach's command post</span>
         </div>
-        <ExecutorModeSelector />
       </header>
 
       <StatusRibbon story={view.type === "story" ? view.story : null} />
