@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { BrowserWindow, safeStorage } from "electron";
 import { Orchestrator } from "../core/orchestrator.js";
 import { FakeJira } from "../core/fakes/fake-jira.js";
@@ -14,10 +15,11 @@ import { GitWorkspace } from "../core/adapters/git-workspace.js";
 import { JiraReadAdapter } from "../core/adapters/jira-read-adapter.js";
 import { KiroDraftAdapter } from "../core/adapters/kiro-draft-adapter.js";
 import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
-import { run as sandcastleRun } from "@ai-hero/sandcastle";
+import { createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { KiroExecuteAdapter } from "../core/adapters/kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
+import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
@@ -150,20 +152,27 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
   // a provider config and never contacts the daemon until run() — so it's safe to build even under
   // fakes. The `DUGOUT_EXECUTOR=fakes` path keeps execute fully fake (e2e never touches Docker/kiro).
   const kiroExecute = new KiroExecuteAdapter({
-    run: sandcastleRun,
-    sandbox: docker({
-      imageName: process.env["DUGOUT_SANDBOX_IMAGE"] ?? "dugout-sandbox:local",
-      // Our image bakes the `agent` user at uid/gid 1000 (sandbox/Dockerfile). Pin the container to
-      // it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the image.
-      // Aligning bind-mount ownership across host OSes is part of the deferred image-distribution
-      // question (we can't rebuild per-machine yet; see README + onboarding #18).
-      containerUid: 1000,
-      containerGid: 1000,
-    }),
+    createSandbox,
+    // The Repo config's `toolchain` selects the Dugout-owned kiro+toolchain image (ADR-0015 clause 4;
+    // `build:sandbox` targets). Overridable per toolchain for local image iteration.
+    sandboxFor: (toolchain: Toolchain) =>
+      docker({
+        imageName:
+          process.env[`DUGOUT_SANDBOX_IMAGE_${toolchain.toUpperCase()}`] ?? `dugout-sandbox-${toolchain}:local`,
+        // Our images bake the `agent` user at uid/gid 1000 (sandbox/Dockerfile). Pin the container to
+        // it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the image.
+        // Aligning bind-mount ownership across host OSes is part of the deferred image-distribution
+        // question (we can't rebuild per-machine yet; see README + onboarding #18).
+        containerUid: 1000,
+        containerGid: 1000,
+      }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
     // The clone path (Sand Castle cwd), rescanning once if the cache is stale (ADR-0013). A
     // genuinely-missing clone throws — an operational error the orchestrator unwinds cleanly.
     resolveClonePath: (repo) => repoScope.resolveClonePath(repo),
+    // Read the committed `.dugout/config.yaml` off the host clone; a missing/invalid one throws
+    // (operational, never red — ADR-0015 clause 4).
+    loadConfig: (cwd) => readRepoConfig(cwd, { readFile: (p) => readFile(p, "utf8") }),
     // Re-fork the spec branch clean each run so a restart never resumes a failed attempt (invariant 1).
     clearSpecBranch: (cwd, branch) => gitWorkspace.deleteBranch(cwd, branch),
     ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),

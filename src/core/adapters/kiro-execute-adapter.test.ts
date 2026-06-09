@@ -1,156 +1,178 @@
 import { describe, it, expect } from "vitest";
-import { KiroExecuteAdapter } from "./kiro-execute-adapter.js";
-import { TEST_REPORT_TAG, AMBIGUITY_TAG } from "./execute-methodology.js";
-import type { SandcastleRun } from "./sandcastle.js";
+import { KiroExecuteAdapter, type KiroExecuteDeps } from "./kiro-execute-adapter.js";
+import { AMBIGUITY_TAG } from "./execute-methodology.js";
+import type { RepoConfig } from "../repo-config.js";
 
 const baseInput = { specId: "s1", repo: "api", markdown: "# Spec", storyKey: "DUG-1", baseBranch: "main" };
 
-/** A fake run() returning a canned RunResult; records the options it was called with. */
-function fakeRun(result: any): { run: SandcastleRun; calls: any[] } {
-  const calls: any[] = [];
-  const run = (async (opts: any) => {
-    calls.push(opts);
-    return result;
-  }) as unknown as SandcastleRun;
-  return { run, calls };
+const config: RepoConfig = { testCommand: "npm test", reportFormat: "vitest-json", toolchain: "node" };
+
+/** A vitest `--reporter=json` stdout naming the given failing full-test-names in one file. */
+const report = (...failing: string[]) =>
+  JSON.stringify({
+    testResults: [
+      {
+        name: "suite.test.ts",
+        status: failing.length ? "failed" : "passed",
+        assertionResults: failing.map((f) => ({ fullName: f, status: "failed" })),
+      },
+    ],
+  });
+
+const kiroBuilt = `implementing...\n<promise>COMPLETE</promise>`;
+
+interface FakeOpts {
+  /** Per-`run()` stdout, in call order: [baseline, build, after]. */
+  runs: string[];
+  branch?: string;
+  config?: RepoConfig;
+  loadConfig?: (cwd: string) => Promise<RepoConfig>;
+  createThrows?: Error;
 }
 
-const deps = (run: SandcastleRun) => ({
-  run,
-  sandbox: { __fake: "sandbox" } as any,
-  makeAgent: () => ({ name: "kiro" }) as any,
-  resolveClonePath: async (_repo: string) => "/ws/api",
-  // The spec branch is re-forked clean every run (invariant 1); the unit fake records the call.
-  clearSpecBranch: async (_cwd: string, _branch: string) => {},
-  // Inject the key so the unit tier is hermetic (runs through fakes with no secret in the env) —
-  // the default `npm test`/CI must not require KIRO_API_KEY (CLAUDE.md testing pyramid).
-  apiKey: "k-test",
-});
-
-/** kiro prints the report INTO stdout (we don't use Sandcastle's Output extraction — spike note). */
-const reportStdout = (baselineFailures: string[], afterFailures: string[]) =>
-  `building...\n<${TEST_REPORT_TAG}>${JSON.stringify({ baselineFailures, afterFailures })}</${TEST_REPORT_TAG}>\n<promise>COMPLETE</promise>`;
+/** A fake createSandbox seam: a persistent Sandbox whose run() returns scripted stdout per call. */
+function fakeDeps(opts: FakeOpts) {
+  const runCalls: any[] = [];
+  const createCalls: any[] = [];
+  const order: string[] = [];
+  let closed = 0;
+  let i = 0;
+  const branch = opts.branch ?? "spec/DUG-1/s1";
+  const sandbox = {
+    branch,
+    worktreePath: "/wt",
+    run: async (o: any) => {
+      runCalls.push(o);
+      order.push("run");
+      return { stdout: opts.runs[i++] ?? "", iterations: [], commits: [] };
+    },
+    interactive: async () => ({ commits: [], exitCode: 0 }),
+    close: async () => {
+      closed++;
+      order.push("close");
+    },
+    [Symbol.asyncDispose]: async () => {},
+  };
+  const deps: KiroExecuteDeps = {
+    createSandbox: (async (o: any) => {
+      createCalls.push(o);
+      order.push("create");
+      if (opts.createThrows) throw opts.createThrows;
+      return sandbox;
+    }) as any,
+    sandboxFor: (toolchain) => ({ __image: toolchain }) as any,
+    makeAgent: () => ({ name: "kiro" }) as any,
+    resolveClonePath: async () => "/ws/api",
+    loadConfig: opts.loadConfig ?? (async () => opts.config ?? config),
+    clearSpecBranch: async () => {
+      order.push("clear");
+    },
+    apiKey: "k-test",
+  };
+  return { deps, runCalls, createCalls, order, closed: () => closed };
+}
 
 describe("KiroExecuteAdapter", () => {
-  it("returns green with the produced branch when the report shows no new failures", async () => {
-    const { run, calls } = fakeRun({
-      branch: "spec/DUG-1/s1",
-      commits: [{ sha: "abc" }],
-      stdout: reportStdout(["x"], ["x"]),
-    });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+  it("grades green and returns the branch when the after-suite adds no failure over baseline", async () => {
+    const f = fakeDeps({ runs: [report("pre"), kiroBuilt, report("pre")] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
     expect(out).toEqual({ result: "green", branch: "spec/DUG-1/s1" });
-    // cwd is the resolved clone; the spec branch is named `spec/<key>/<specId>` (a sibling of the
-    // story branch `story/<key>`, never nested under it — no D/F ref collision, ADR-0013) and seeded
-    // from the orchestrator-supplied base branch (story HEAD once #8 accumulates; else repo default).
-    expect(calls[0].cwd).toBe("/ws/api");
-    expect(calls[0].branchStrategy).toEqual({
-      type: "branch",
+    // The persistent sandbox is forked on the spec branch from the orchestrator-supplied baseBranch,
+    // in the toolchain image, anchored at the clone cwd.
+    expect(f.createCalls[0]).toMatchObject({
       branch: "spec/DUG-1/s1",
       baseBranch: "main",
+      cwd: "/ws/api",
+      sandbox: { __image: "node" },
     });
+    // baseline → build → after = three runs against the one sandbox.
+    expect(f.runCalls).toHaveLength(3);
   });
 
-  it("clears the spec branch before run() so a restart re-forks clean, never resumes (invariant 1)", async () => {
-    const order: string[] = [];
-    const cleared: Array<[string, string]> = [];
-    const run = (async () => {
-      order.push("run");
-      return { branch: "spec/DUG-1/s1", commits: [], stdout: reportStdout([], []) };
-    }) as unknown as SandcastleRun;
-    const d = {
-      ...deps(run),
-      clearSpecBranch: async (cwd: string, branch: string) => {
-        order.push("clear");
-        cleared.push([cwd, branch]);
-      },
-    };
-    await new KiroExecuteAdapter(d).execute(baseInput);
-    // The adapter deletes any leftover spec branch from a failed attempt before Sand Castle forks it
-    // anew from baseBranch — so a retry starts clean, never on the abandoned commits (ADR-0013).
-    expect(cleared).toEqual([["/ws/api", "spec/DUG-1/s1"]]);
-    expect(order).toEqual(["clear", "run"]);
+  it("clears the spec branch before createSandbox so a restart re-forks clean (invariant 1)", async () => {
+    const f = fakeDeps({ runs: [report(), kiroBuilt, report()] });
+    await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(f.order.slice(0, 2)).toEqual(["clear", "create"]);
   });
 
-  it("returns red when the report shows a new failure", async () => {
-    const { run } = fakeRun({ branch: "b", commits: [], stdout: reportStdout([], ["new-test"]) });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+  it("grades red naming the new failure the build introduced", async () => {
+    const f = fakeDeps({ runs: [report(), kiroBuilt, report("regression")] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
     expect(out.result).toBe("red");
-    expect(out.result === "red" && out.reason).toMatch(/new-test/);
+    expect(out.result === "red" && out.reason).toMatch(/regression/);
   });
 
-  it("returns ambiguous when kiro emitted the ambiguity marker (no grading)", async () => {
-    const { run } = fakeRun({
-      branch: "b",
-      commits: [],
-      stdout: `thinking...\n<${AMBIGUITY_TAG}>which auth scheme?</${AMBIGUITY_TAG}>\n`,
-    });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+  it("short-circuits to ambiguous when kiro ends on the ambiguity tag — and SKIPS the after-run", async () => {
+    const build = `thinking...\n<${AMBIGUITY_TAG}>which auth scheme?</${AMBIGUITY_TAG}>`;
+    const f = fakeDeps({ runs: [report(), build /* no after-run */] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
     expect(out).toEqual({ result: "ambiguous", reason: "which auth scheme?" });
+    expect(f.runCalls).toHaveLength(2); // baseline + build only; no after-suite
   });
 
-  it("returns red when the report is missing/unparseable", async () => {
-    const { run } = fakeRun({ branch: "b", commits: [], stdout: "no report here" });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out.result).toBe("red");
-    expect(out.result === "red" && out.reason).toMatch(/report/i);
+  it("proceeds (last control tag wins) when an ambiguity tag is echoed but the build then COMPLETES", async () => {
+    const build = `<${AMBIGUITY_TAG}>one-line reason</${AMBIGUITY_TAG}>\n...work...\n<promise>COMPLETE</promise>`;
+    const f = fakeDeps({ runs: [report(), build, report()] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "spec/DUG-1/s1" });
+    expect(f.runCalls).toHaveLength(3);
   });
 
-  it("grades green when the report JSON carries ANSI escapes (kiro emits them even with NO_COLOR)", async () => {
-    // kiro still emits ANSI when piped (#8352); the draft path strips it, the execute path must too.
-    const body = JSON.stringify({ baselineFailures: ["x"], afterFailures: ["x"] });
-    const stdout = `building...\n<${TEST_REPORT_TAG}>[32m${body}[0m</${TEST_REPORT_TAG}>\n`;
-    const { run } = fakeRun({ branch: "b", commits: [], stdout });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out).toEqual({ result: "green", branch: "b" });
-  });
-
-  it("grades green when the report JSON is wrapped in a ```json code fence", async () => {
-    const body = JSON.stringify({ baselineFailures: [], afterFailures: [] });
-    const stdout = `<${TEST_REPORT_TAG}>\`\`\`json\n${body}\n\`\`\`</${TEST_REPORT_TAG}>`;
-    const { run } = fakeRun({ branch: "b", commits: [], stdout });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out).toEqual({ result: "green", branch: "b" });
-  });
-
-  it("uses the LAST valid report when kiro echoed the prompt's template earlier", async () => {
-    // The methodology prompt embeds a literal <dugout-test-report>{...[...]...}</…> template; if kiro
-    // narrates it before emitting the real report, the real (last, valid) one must win.
-    const echoed = `<${TEST_REPORT_TAG}>{"baselineFailures":[...],"afterFailures":[...]}</${TEST_REPORT_TAG}>`;
-    const real = `<${TEST_REPORT_TAG}>${JSON.stringify({ baselineFailures: [], afterFailures: ["c"] })}</${TEST_REPORT_TAG}>`;
-    const { run } = fakeRun({ branch: "b", commits: [], stdout: `${echoed}\n...work...\n${real}\n` });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out.result).toBe("red");
-    expect(out.result === "red" && out.reason).toMatch(/c/);
-  });
-
-  it("grades the report even when an ambiguity tag is also present (report-first: kiro proceeded)", async () => {
-    const body = JSON.stringify({ baselineFailures: [], afterFailures: [] });
-    const stdout = `<${AMBIGUITY_TAG}>echoed instruction</${AMBIGUITY_TAG}>\n<${TEST_REPORT_TAG}>${body}</${TEST_REPORT_TAG}>`;
-    const { run } = fakeRun({ branch: "b", commits: [], stdout });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out).toEqual({ result: "green", branch: "b" });
-  });
-
-  it("treats a present-but-empty ambiguity tag as ambiguous (with a fallback reason), not red", async () => {
-    const { run } = fakeRun({ branch: "b", commits: [], stdout: `<${AMBIGUITY_TAG}></${AMBIGUITY_TAG}>\n` });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
+  it("treats a present-but-empty ambiguity tag (no completion) as ambiguous with a fallback reason", async () => {
+    const f = fakeDeps({ runs: [report(), `<${AMBIGUITY_TAG}></${AMBIGUITY_TAG}>`] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
     expect(out.result).toBe("ambiguous");
     expect(out.result === "ambiguous" && out.reason.length).toBeGreaterThan(0);
   });
 
-  it("grades red when a report failure id is not a string", async () => {
-    const stdout = `<${TEST_REPORT_TAG}>{"baselineFailures":[],"afterFailures":[{"name":"t"}]}</${TEST_REPORT_TAG}>`;
-    const { run } = fakeRun({ branch: "b", commits: [], stdout });
-    const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out.result).toBe("red");
-    expect(out.result === "red" && out.reason).toMatch(/report/i);
+  it("grades through ANSI escapes in the command-runner report (#8352)", async () => {
+    const ansi = `[32m${report("pre")}[0m`;
+    const f = fakeDeps({ runs: [ansi, kiroBuilt, ansi] });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "spec/DUG-1/s1" });
   });
 
-  it("rethrows operational failures (run() throws) — not a spec outcome", async () => {
-    const run = (async () => {
-      throw new Error("docker daemon not reachable");
-    }) as unknown as SandcastleRun;
-    await expect(new KiroExecuteAdapter(deps(run)).execute(baseInput)).rejects.toThrow(/docker/i);
+  it("THROWS (operational, not red) when a command-runner run yields no parseable report", async () => {
+    // ADR-0015 clause 6 inverts ADR-0012: the harness authors the report now, so absence means the
+    // harness could not run the suite (bad command/toolchain) — an environment error, not a spec red.
+    const f = fakeDeps({ runs: [report(), kiroBuilt, "command not found"] });
+    await expect(new KiroExecuteAdapter(f.deps).execute(baseInput)).rejects.toThrow(/report/i);
+  });
+
+  it("rethrows operational failures (createSandbox throws) — not a spec outcome", async () => {
+    const f = fakeDeps({ runs: [], createThrows: new Error("docker daemon not reachable") });
+    await expect(new KiroExecuteAdapter(f.deps).execute(baseInput)).rejects.toThrow(/docker/i);
+  });
+
+  it("rethrows when the Repo config is missing/invalid (operational, fix-it)", async () => {
+    const f = fakeDeps({
+      runs: [],
+      loadConfig: async () => {
+        throw new Error(".dugout/config.yaml not found");
+      },
+    });
+    await expect(new KiroExecuteAdapter(f.deps).execute(baseInput)).rejects.toThrow(/config\.yaml/);
+  });
+
+  it("selects the parser by the Repo config's reportFormat (trx)", async () => {
+    const trx = (outcome: string) => `<TestRun><Results>
+      <UnitTestResult testId="g1" outcome="${outcome}" />
+    </Results><TestDefinitions>
+      <UnitTest id="g1"><TestMethod className="N.C, A" name="M" /></UnitTest>
+    </TestDefinitions></TestRun>`;
+    const f = fakeDeps({
+      runs: [trx("Passed"), kiroBuilt, trx("Failed")],
+      config: { testCommand: "dotnet test", reportFormat: "trx", toolchain: "dotnet" },
+    });
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(out.result).toBe("red");
+    expect(out.result === "red" && out.reason).toMatch(/N\.C\.M/);
+  });
+
+  it("always closes the sandbox, even on a red grade", async () => {
+    const f = fakeDeps({ runs: [report(), kiroBuilt, report("regression")] });
+    await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(f.closed()).toBe(1);
+    expect(f.order[f.order.length - 1]).toBe("close");
   });
 });

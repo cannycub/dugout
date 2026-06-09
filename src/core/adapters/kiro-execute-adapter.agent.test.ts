@@ -4,10 +4,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as sandcastleRun } from "@ai-hero/sandcastle";
+import { createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { KiroExecuteAdapter } from "./kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "./kiro-agent-provider.js";
+import type { RepoConfig } from "../repo-config.js";
 import { GitWorkspace } from "./git-workspace.js";
 
 const sh = promisify(execFile);
@@ -20,10 +21,10 @@ const sh = promisify(execFile);
  *   npm run test:agent          # needs KIRO_API_KEY, a reachable Docker daemon, and the image
  *
  * Prerequisites FAIL LOUDLY, never skip — a skip reports green and gives false confidence the agent
- * was tested. This is the only tier that proves the real pipeline end to end: kiro builds the spec
- * red→green inside the box, runs the suite twice, emits the folded <dugout-test-report>, and the
- * adapter parses stdout + grades it green (the baseline mechanism the Task 0 spike locked in — see
- * docs/superpowers/notes/2026-06-08-sandcastle-spike.md). Build the sandbox image first:
+ * was tested. This is the only tier that proves the real pipeline end to end: the harness runs the
+ * suite as a command before and after kiro's build (command-runner through Sand Castle's run() seam),
+ * kiro builds the spec red→green inside the box, and the adapter parses the two reporter stdouts and
+ * grades the diff host-side (ADR-0015 — harness-observed grading). Build the sandbox image first:
  *
  *   npm run build:sandbox
  *
@@ -68,13 +69,15 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
   }, 120_000);
 
   it("builds a spec red→green and grades it green, producing a branch", async () => {
+    const nodeConfig: RepoConfig = { testCommand: "npx vitest run --reporter=json", reportFormat: "vitest-json", toolchain: "node" };
     const adapter = new KiroExecuteAdapter({
-      run: sandcastleRun,
+      createSandbox,
       // containerUid/Gid pinned to the image's baked `agent` uid (sandbox/Dockerfile), matching the
       // live wiring — Sand Castle's UID preflight otherwise expects the host uid and rejects.
-      sandbox: docker({ imageName: "dugout-sandbox:local", containerUid: 1000, containerGid: 1000 }),
+      sandboxFor: () => docker({ imageName: "dugout-sandbox-node:local", containerUid: 1000, containerGid: 1000 }),
       makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
       resolveClonePath: async () => clone,
+      loadConfig: async () => nodeConfig,
       // Real clean-restart: prune+delete the spec branch in the clone so Sand Castle re-forks it
       // fresh — exactly the production wiring (orchestrator-host) uses (ADR-0013).
       clearSpecBranch: (cwd, branch) => new GitWorkspace({ roots: [] }).deleteBranch(cwd, branch),

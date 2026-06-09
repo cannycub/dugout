@@ -130,7 +130,9 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
 7. **Side-effects are best-effort and non-blocking.** Jira writes and Datadog metrics must
    never wedge the build; they degrade to warnings.
 8. **Per-spec green** = the local **full** test suite passing in the sandbox, with pre-existing
-   failing tests **baselined**. The real CI on the PR is the final gate.
+   failing tests **baselined**, and the suite is **harness-observed**: the harness runs it before and
+   after the build and grades the diff host-side — the building agent never self-reports the grade
+   (ADR-0015). The real CI on the PR is the final gate.
 9. **Metrics are for improvement only** — aggregated by spec/stage/repo/ticket-quality, never
    used to rank developers.
 
