@@ -426,11 +426,14 @@ export class Orchestrator {
 }
 
 /** Merge the canonical contract with run-state into the assembled view. */
-function assemble(content: StorySpecs, run: StoryRunState): Story {
+export function assemble(content: StorySpecs, run: StoryRunState): Story {
   const statusById = new Map(run.specs.map((s) => [s.specId, s.status]));
   const specs: Spec[] = content.specs
     .slice()
     .sort((a, b) => a.order - b.order)
+    // Lenient on purpose: run-state (SQLite) is ephemeral and rebuildable, the contract (git) is
+    // canonical. A spec the run-state has never seen assembles at the start of its lifecycle —
+    // the seed of "rebuild run-state from canonical content". See ADR-0016.
     .map((c) => ({ ...c, status: statusById.get(c.id) ?? "drafted" }));
   return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
 }
