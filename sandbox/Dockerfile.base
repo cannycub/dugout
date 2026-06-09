@@ -1,0 +1,67 @@
+# Shared Sand Castle sandbox base for Dugout execute mode (#7, #33): headless kiro + git on a minimal
+# Debian, with the Sand Castle `agent` user. The per-toolchain images (Dockerfile.node,
+# Dockerfile.dotnet) build FROM this and add ONLY their toolchain, so each stays lean — the ADR-0015
+# decision against one combined kiro+node+dotnet image. kiro is installed once here so its
+# (fiddly, supply-chain-sensitive) install stanza never drifts between toolchains.
+#
+# This is a PRODUCT artifact, not test-only: the per-toolchain children are the images the live app
+# launches containers from (orchestrator-host wires docker({ imageName: `dugout-sandbox-<toolchain>` }),
+# selected by the Repo config `toolchain`). Dugout does NOT create containers — Sand Castle's docker()
+# provider does (docker run/exec/teardown, bind-mounting the worktree). We only supply the image. Sand
+# Castle requires that image to:
+#   - contain the agent CLI (kiro) + the toolchain the spec's suite needs, and
+#   - keep itself alive via `ENTRYPOINT ["sleep", "infinity"]` — Sand Castle relies on the image's
+#     entrypoint and injects no keep-alive of its own. (A toolchain base's default entrypoint exits at
+#     once, so the container would die before Sand Castle can set it up.)
+# kiro authenticates headlessly via KIRO_API_KEY, injected by the kiro agent provider at run time
+# (never baked in). Build all images with:  npm run build:sandbox
+#
+# Build with `docker buildx build --load --provenance=false --sbom=false` (baked into
+# `npm run build:sandbox`), NOT a bare `docker build`. With Docker Desktop's containerd image store,
+# buildx attaches provenance/SBOM attestations by default, producing a manifest *list* (OCI index).
+# `docker images` still lists the tag, but `docker image inspect <tag>` — which Sand Castle's docker
+# provider runs as a pre-flight (`--format {{.Config.User}}`) — fails to resolve the tag against an
+# index ("No such image"), so execute mode dies at sandbox start. Disabling the attestations AND
+# `--load` (which exports a single-platform image into the local image store) yield a tag that
+# `docker image inspect` resolves cleanly (#37).
+FROM debian:bookworm-slim
+
+# Toolchain Sand Castle needs regardless of language: git for the worktree/commits, curl + ca-certs
+# for the kiro install, unzip which the kiro installer requires to unpack its binary (the official
+# node base bundled it; debian-slim does not). (apt packages come from Debian's GPG-signed repos —
+# verified, though not version-pinned; pinning bookworm point releases is brittle and low-value for a
+# rebuilt-on-demand dev image.)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git curl ca-certificates unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+# A non-root `agent` user at uid/gid 1000 with home /home/agent (Sand Castle convention). The live
+# wiring pins containerUid/Gid to 1000 so Sand Castle's UID preflight matches.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+RUN groupadd -g ${AGENT_GID} agent \
+ && useradd -m -u ${AGENT_UID} -g ${AGENT_GID} -d /home/agent agent
+
+USER ${AGENT_UID}:${AGENT_GID}
+ENV HOME=/home/agent
+ENV PATH=/home/agent/.local/bin:${PATH}
+
+# Headless kiro CLI (kiro.dev/docs/cli/headless). Installs to ~/.local/bin (already on PATH above).
+# Supply chain: the installer itself fetches a SHA-256 manifest and verifies the downloaded binary
+# against it, so the binary is checksum-verified end to end; the script is fetched over HTTPS from the
+# kiro vendor domain. The installer exposes NO version pin (only `--channel`, always latest), so we
+# pin the channel explicitly and take latest-stable — reproducible version pinning needs kiro to
+# publish targetable versioned artifacts (hardening follow-up).
+# pipefail (via the bash SHELL) so a failed download fails the build rather than piping a truncated
+# script into bash; Docker's default /bin/sh (dash) has no pipefail.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -fsSL https://cli.kiro.dev/install | bash -s -- --channel stable \
+ && kiro-cli --version
+
+# Sand Castle bind-mounts the worktree at the repo dir and overrides the working dir to it at start,
+# so WORKDIR is only the pre-start default. Validate end to end with `npm run test:agent` (Docker up
+# + KIRO_API_KEY) — the execute agent test fails loudly otherwise.
+WORKDIR /home/agent/workspace
+
+# Keep the container alive for Sand Castle to exec into (it supplies no keep-alive itself).
+ENTRYPOINT ["sleep", "infinity"]

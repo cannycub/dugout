@@ -1,0 +1,30 @@
+# .NET toolchain image for Dugout execute mode: the shared kiro base + the .NET 8 SDK (LTS). Selected
+# by Repo config `toolchain: dotnet` (orchestrator-host → docker({ imageName:
+# "dugout-sandbox-dotnet:local" })). Build via `npm run build:sandbox`.
+#
+# Installed via Microsoft's official `dotnet-install.sh` rather than apt: the packages-microsoft-prod
+# feed no longer carries dotnet-sdk-8.0 for Debian 12, and the install script is distro-agnostic (it
+# downloads a checksum-verified SDK tarball to a fixed dir). The .NET runtime needs libicu for
+# globalization; install it so `dotnet test` runs rather than crashing on missing ICU.
+# `dotnet test --logger trx` produces the TRX the trx ReportParser consumes; the testCommand in the
+# repo's .dugout/config.yaml is responsible for routing that TRX to stdout. Disable the first-run
+# telemetry/greeting so they never pollute the reporter stdout.
+FROM dugout-sandbox-base:local
+
+USER root
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libicu72 \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+ && bash /tmp/dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet \
+ && rm /tmp/dotnet-install.sh \
+ && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+ && dotnet --version
+
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+
+USER 1000:1000

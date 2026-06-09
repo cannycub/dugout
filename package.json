@@ -15,7 +15,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:agent": "vitest run --config vitest.agent.config.ts",
-    "build:sandbox": "docker build --provenance=false --sbom=false -t dugout-sandbox:local sandbox/",
+    "build:sandbox": "npm run build:sandbox:base && npm run build:sandbox:node && npm run build:sandbox:dotnet",
+    "build:sandbox:base": "docker buildx build --load --provenance=false --sbom=false -f sandbox/Dockerfile.base -t dugout-sandbox-base:local sandbox/",
+    "build:sandbox:node": "docker buildx build --load --provenance=false --sbom=false -f sandbox/Dockerfile.node -t dugout-sandbox-node:local sandbox/",
+    "build:sandbox:dotnet": "docker buildx build --load --provenance=false --sbom=false -f sandbox/Dockerfile.dotnet -t dugout-sandbox-dotnet:local sandbox/",
     "test:e2e": "electron-vite build && playwright test",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
@@ -41,6 +44,7 @@
     "@ai-hero/sandcastle": "^0.7.0",
     "motion": "^11.15.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "yaml": "^2.9.0"
   }
 }

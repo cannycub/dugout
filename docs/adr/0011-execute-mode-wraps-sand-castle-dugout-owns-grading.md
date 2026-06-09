@@ -27,11 +27,14 @@ settles **how** execute mode is built (issue #7).
    signal, the harness runs the full suite *in the sandbox* and compares the failing set to a
    baseline captured on the seed. The grading is a **pure function** (`grade-execute.ts`), the
    highest-value unit-test target.
-   > **Amended by [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md).**
-   > Sand Castle 0.7 exposes no host-readable in-sandbox suite run (its hooks are fire-and-forget),
-   > so v1 ships the inverse of this clause: **kiro** runs the suite twice and self-reports both
-   > failing-id lists, and the harness only diffs them. "The harness runs the full suite" and "kiro
-   > never self-reports green" are deferred — see ADR-0012 for the integrity caveats and the path back.
+   > **Amended by [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md), then
+   > restored by [ADR-0015](0015-harness-observed-execute-grading-via-command-runner-agent.md).**
+   > ADR-0012 (now superseded) deferred this clause because Sand Castle 0.7's hooks are
+   > fire-and-forget: v1 shipped the inverse, kiro self-reporting both failing-id lists. The #33 spike
+   > found the harness can run the suite in the sandbox after all — by driving the test command
+   > through Sand Castle's public `run()` agent seam (provider- and language-agnostic) — so ADR-0015
+   > **restores this clause as written**: the harness runs the full suite in the sandbox and kiro
+   > never self-reports green.
 
 4. **The `ExecutorPort` outcome contract gains a third arm** — `ExecuteOutcome` becomes
    `green | ambiguous | red`:
@@ -51,6 +54,11 @@ settles **how** execute mode is built (issue #7).
    `runKiro` is injected into the draft adapter. Unit tests pass a fake `run`; real Docker + kiro
    runs live in the agent tier (`kiro-execute-adapter.agent.test.ts`, not in CI), which additionally
    requires a reachable Docker daemon + a Sand Castle image and fails loudly if absent.
+   > **Amended by [ADR-0015](0015-harness-observed-execute-grading-via-command-runner-agent.md).**
+   > Harness-observed grading needs two suite runs bracketing the build in one persistent box, so the
+   > injected seam moves from `typeof run` to `typeof createSandbox` (the fake returns a `Sandbox`
+   > whose `run()` is scripted per call). The agent-tier toolchain prerequisite is unchanged, and now
+   > spans a node and a dotnet image.
 
 Scope: **single spec** (#7). Story-branch creation and accumulation (the real `merge()`, seeding
 spec N from the updated story-branch HEAD, same-repo-serial / cross-repo-parallel) are **#8**.
@@ -83,5 +91,7 @@ spec N from the updated story-branch HEAD, same-repo-serial / cross-repo-paralle
   via `review-required` (manual, outside Dugout in v1). A replay spec may add few/no new tests, so
   for it `green` degrades to "the full suite still passes (no regressions)."
 - Replacing Sand Castle, or moving grading into the agent, would require a new ADR superseding this.
-  Moving grading into the agent is exactly what v1 did under the Sand Castle 0.7 constraint — recorded
-  in [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md), which amends §3.
+  Moving grading into the agent is what v1 did under the Sand Castle 0.7 constraint — recorded in
+  [ADR-0012](0012-execute-grading-runs-on-kiros-folded-self-report-in-v1.md), now **superseded by
+  [ADR-0015](0015-harness-observed-execute-grading-via-command-runner-agent.md)**, which moves grading
+  back to the harness via the `run()` agent seam and restores §3.

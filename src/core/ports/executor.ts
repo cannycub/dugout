@@ -89,9 +89,11 @@ export interface ExecuteInput {
  *  - `ambiguous` — the agent hit a fork it cannot resolve without guessing and refused to proceed
  *                  (build-time analogue of `needs-clarification`); the dev re-clarifies, then the
  *                  spec clean-restarts.
- *  - `red`       — the agent completed *without* ambiguity but the green gate is not met (or the
- *                  test report was missing/unparseable — `reason` says so); nothing to clarify,
- *                  retry/investigate.
+ *  - `red`       — the agent completed *without* ambiguity but the harness-observed green gate is not
+ *                  met: the after-suite has a failing test the baseline did not (`reason` names it);
+ *                  nothing to clarify, retry/investigate. A missing/unparseable report is NOT red — it
+ *                  means the harness could not run the suite (bad command/toolchain/config) and is an
+ *                  operational throw, not a spec outcome (ADR-0015 clause 6).
  * Any non-green outcome fails the spec and the story for a clean restart, never a resume (inv. 1).
  */
 export type ExecuteOutcome =
