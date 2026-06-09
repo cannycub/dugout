@@ -61,6 +61,17 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
 - **Declared repo** — a catalog identity the developer puts in scope for a story, bound to their
   local clone. The developer selects them from the (searchable) catalog *before* drafting; no
   agent suggestion. Each spec in the fan-out is then assigned to exactly one declared repo.
+- **Repo config** — a committed, per-repo configuration file Dugout reads to work with that repo in a
+  language-agnostic way. Its first fields are `testCommand` (a shell snippet that runs the repo's
+  suite and prints a machine report to stdout), `reportFormat` (the discriminant selecting the
+  host-side `ReportParser` — e.g. `vitest-json`, `trx`), and `toolchain` (e.g. `node`, `dotnet`,
+  which Dugout maps to a Dugout-owned kiro+toolchain sandbox image — distinct from the Sand Castle
+  *backend* provider, which stays a Sand Castle concern). Together they let the **harness** run and
+  grade the suite without assuming the repo's language. Deliberately a general repo-config seam, not
+  a test-only manifest: its scope may grow beyond tests. The committed file (`.dugout/config.yaml`,
+  YAML) is canonical; when absent the harness fails loudly with a fix-it message — Dugout never
+  silently auto-generates it, though *assisting* the developer to author one is a later concern. Not
+  derived from disk layout.
 - **`review-required`** — a per-spec flag; when set, execution stops after the spec goes green
   **and merges into the story branch**, for the developer's code review before the next spec runs.
   The spec is already integrated at the stop (it rests at `merged` while the story rests at

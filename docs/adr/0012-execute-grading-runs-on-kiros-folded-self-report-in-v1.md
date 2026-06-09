@@ -1,5 +1,12 @@
 # Execute grading runs on kiro's folded self-report in v1 (amends ADR-0011 §3)
 
+> **Superseded by [ADR-0015](0015-harness-observed-execute-grading-via-command-runner-agent.md).**
+> The #33 spike found the path this ADR deferred: driving the test command through Sand Castle's
+> public `run()` agent seam lets the *harness* observe the suite in the sandbox (provider- and
+> language-agnostic), so kiro no longer authors the grade inputs. ADR-0011 §3 is restored. The
+> folded self-report below is no longer how execute mode grades — kept for the rationale and the
+> integrity caveats that motivated #33.
+
 ADR-0011 §3 decided: *"Dugout owns grading; kiro never self-reports green. After kiro's completion
 signal, **the harness runs the full suite in the sandbox** and compares the failing set to a baseline
 captured on the seed."* The #7 implementation spike (Task 0,
