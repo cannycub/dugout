@@ -9,7 +9,15 @@
 #     entrypoint and injects no keep-alive of its own. (A plain `node:22` entrypoint exits at once,
 #     so the container dies before Sand Castle can set it up.)
 # kiro authenticates headlessly via KIRO_API_KEY, injected by the kiro agent provider at run time
-# (never baked in). Build:  docker build -t dugout-sandbox:local sandbox/
+# (never baked in). Build:  npm run build:sandbox
+#
+# Build with `--provenance=false --sbom=false` (baked into `npm run build:sandbox`), NOT a bare
+# `docker build`. With Docker Desktop's containerd image store, buildx attaches provenance/SBOM
+# attestations by default, producing a manifest *list* (OCI index). `docker images` still lists the
+# tag, but `docker image inspect <tag>` — which Sand Castle's docker provider runs as a pre-flight
+# (`--format {{.Config.User}}`) — intermittently fails to resolve the tag against an index ("No such
+# image"), so execute mode dies at sandbox start. Disabling the attestations yields a single-platform
+# image whose tag resolves cleanly.
 #
 # Sand Castle bind-mounts the worktree at the repo dir and overrides the working dir to it at start,
 # so WORKDIR is only the pre-start default. Validate end to end with `npm run test:agent` (Docker up

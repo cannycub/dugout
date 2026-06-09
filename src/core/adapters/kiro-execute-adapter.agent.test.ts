@@ -24,7 +24,10 @@ const sh = promisify(execFile);
  * adapter parses stdout + grades it green (the baseline mechanism the Task 0 spike locked in — see
  * docs/superpowers/notes/2026-06-08-sandcastle-spike.md). Build the sandbox image first:
  *
- *   docker build -t dugout-sandbox:local sandbox/
+ *   npm run build:sandbox
+ *
+ * (Use the script, not a bare `docker build` — it disables buildx provenance/SBOM attestations so
+ * the tag resolves under Docker Desktop's containerd store; see sandbox/Dockerfile.)
  */
 const KIRO_API_KEY = process.env["KIRO_API_KEY"];
 
@@ -41,7 +44,7 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
     await sh("docker", ["info"]).catch(() => {
       throw new Error(
         "execute agent suite needs a reachable Docker daemon (real sandcastle.run()). Start Docker " +
-          "and build the image: `docker build -t dugout-sandbox:local sandbox/`.",
+          "and build the image: `npm run build:sandbox`.",
       );
     });
     // A throwaway repo with one trivially-specifiable feature and an existing node:test runner.

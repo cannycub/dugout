@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:agent": "vitest run --config vitest.agent.config.ts",
+    "build:sandbox": "docker build --provenance=false --sbom=false -t dugout-sandbox:local sandbox/",
     "test:e2e": "electron-vite build && playwright test",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },

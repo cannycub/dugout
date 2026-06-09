@@ -63,7 +63,8 @@ Jira · Datadog · AWS Athena (replay output, v1.5+).
 `npm test` runs the unit suite; `npm run test:e2e` drives the UI against the fakes. The agent
 integration tier (`npm run test:agent`) runs against real kiro and is excluded from CI. Execute-mode
 agent tests additionally need a running Docker daemon and the Sand Castle sandbox image — build it
-once with `docker build -t dugout-sandbox:local sandbox/`.
+once with `npm run build:sandbox` (which disables buildx provenance/SBOM attestations so the image
+tag resolves under Docker Desktop's containerd store; see `sandbox/Dockerfile`).
 
 ## Status
 
