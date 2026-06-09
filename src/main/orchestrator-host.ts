@@ -155,16 +155,19 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     createSandbox,
     // The Repo config's `toolchain` selects the Dugout-owned kiro+toolchain image (ADR-0015 clause 4;
     // `build:sandbox` targets). Overridable per toolchain for local image iteration.
-    sandboxFor: (toolchain: Toolchain) =>
+    sandboxFor: (toolchain: Toolchain, env) =>
       docker({
         imageName:
           process.env[`DUGOUT_SANDBOX_IMAGE_${toolchain.toUpperCase()}`] ?? `dugout-sandbox-${toolchain}:local`,
-        // Our images bake the `agent` user at uid/gid 1000 (sandbox/Dockerfile). Pin the container to
-        // it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the image.
-        // Aligning bind-mount ownership across host OSes is part of the deferred image-distribution
-        // question (we can't rebuild per-machine yet; see README + onboarding #18).
+        // Our images bake the `agent` user at uid/gid 1000 (sandbox/Dockerfile.base). Pin the container
+        // to it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the
+        // image. Aligning bind-mount ownership across host OSes is part of the deferred
+        // image-distribution question (we can't rebuild per-machine yet; see README + onboarding #18).
         containerUid: 1000,
         containerGid: 1000,
+        // Inject the build agent's env (KIRO_API_KEY, …) at container launch — Sand Castle does not
+        // apply agent env per-exec on the createSandbox path (ADR-0015 / kiro-execute-adapter).
+        env,
       }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
     // The clone path (Sand Castle cwd), rescanning once if the cache is stale (ADR-0013). A

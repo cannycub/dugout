@@ -60,8 +60,8 @@ function fakeDeps(opts: FakeOpts) {
       if (opts.createThrows) throw opts.createThrows;
       return sandbox;
     }) as any,
-    sandboxFor: (toolchain) => ({ __image: toolchain }) as any,
-    makeAgent: () => ({ name: "kiro" }) as any,
+    sandboxFor: (toolchain, env) => ({ __image: toolchain, __env: env }) as any,
+    makeAgent: () => ({ name: "kiro", env: { KIRO_API_KEY: "k-test" } }) as any,
     resolveClonePath: async () => "/ws/api",
     loadConfig: opts.loadConfig ?? (async () => opts.config ?? config),
     clearSpecBranch: async () => {
@@ -83,7 +83,9 @@ describe("KiroExecuteAdapter", () => {
       branch: "spec/DUG-1/s1",
       baseBranch: "main",
       cwd: "/ws/api",
-      sandbox: { __image: "node" },
+      // The build agent's env (KIRO_API_KEY) must reach the container via the sandbox provider — Sand
+      // Castle does not apply agent env per-exec on the createSandbox path.
+      sandbox: { __image: "node", __env: { KIRO_API_KEY: "k-test" } },
     });
     // baseline → build → after = three runs against the one sandbox.
     expect(f.runCalls).toHaveLength(3);

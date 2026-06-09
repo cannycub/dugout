@@ -11,8 +11,15 @@ import { stripAnsi } from "./kiro-runner.js";
 export interface KiroExecuteDeps {
   /** Injected Sandcastle createSandbox() — the test seam (ADR-0015 clause 2). */
   createSandbox: CreateSandbox;
-  /** The sandbox provider for a toolchain — selects the Dugout-owned kiro+toolchain image. */
-  sandboxFor: (toolchain: Toolchain) => SandboxProvider;
+  /**
+   * The sandbox provider for a toolchain — selects the Dugout-owned kiro+toolchain image — with the
+   * build agent's env injected into the *container* (`docker({ env })`). Sand Castle applies an
+   * `AgentProvider`'s `env` only on the top-level `run()` path; the persistent `createSandbox()`
+   * handle starts the container once with an empty agent env and never re-applies it per exec (it
+   * execs into the running container). So the build agent's secrets — kiro's `KIRO_API_KEY` — must
+   * ride the sandbox provider's launch env to reach kiro at all.
+   */
+  sandboxFor: (toolchain: Toolchain, env: Record<string, string>) => SandboxProvider;
   /** Build the kiro *build* agent provider, given the api key resolved at call time. */
   makeAgent: (apiKey: string) => AgentProvider;
   /** Resolve a declared repo name to its local clone path (Sandcastle cwd). */
@@ -88,10 +95,14 @@ export class KiroExecuteAdapter {
     // createSandbox throwing is an operational failure (sandbox/docker/kiro infra) — let it propagate.
     // The orchestrator resolves `baseBranch` (story HEAD if it exists, else the repo default), so the
     // seed is deterministic and accumulates onto the story branch once #8 lands (ADR-0013).
+    // Build the kiro agent up front so its declared env (KIRO_API_KEY, NO_COLOR…) can be injected into
+    // the container at launch — Sand Castle won't apply it per-exec on the createSandbox path (see
+    // sandboxFor). The same key is harmlessly present for the command-runner suite runs.
+    const buildAgent = this.deps.makeAgent(apiKey);
     const sandbox = await this.deps.createSandbox({
       branch: specBranch,
       baseBranch: input.baseBranch,
-      sandbox: this.deps.sandboxFor(config.toolchain),
+      sandbox: this.deps.sandboxFor(config.toolchain, buildAgent.env),
       cwd,
     });
     try {
@@ -102,7 +113,7 @@ export class KiroExecuteAdapter {
 
       // 2) Build: kiro implements the spec test-first. It may refuse on a genuine ambiguity.
       const build = await sandbox.run({
-        agent: this.deps.makeAgent(apiKey),
+        agent: buildAgent,
         prompt: executeMethodology({ markdown: input.markdown }),
       });
       // kiro emits ANSI even with NO_COLOR when piped (#8352) — strip before tag parsing.

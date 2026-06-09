@@ -16,13 +16,14 @@
 # kiro authenticates headlessly via KIRO_API_KEY, injected by the kiro agent provider at run time
 # (never baked in). Build all images with:  npm run build:sandbox
 #
-# Build with `--provenance=false --sbom=false` (baked into `npm run build:sandbox`), NOT a bare
-# `docker build`. With Docker Desktop's containerd image store, buildx attaches provenance/SBOM
-# attestations by default, producing a manifest *list* (OCI index). `docker images` still lists the
-# tag, but `docker image inspect <tag>` — which Sand Castle's docker provider runs as a pre-flight
-# (`--format {{.Config.User}}`) — intermittently fails to resolve the tag against an index ("No such
-# image"), so execute mode dies at sandbox start. Disabling the attestations yields a single-platform
-# image whose tag resolves cleanly.
+# Build with `docker buildx build --load --provenance=false --sbom=false` (baked into
+# `npm run build:sandbox`), NOT a bare `docker build`. With Docker Desktop's containerd image store,
+# buildx attaches provenance/SBOM attestations by default, producing a manifest *list* (OCI index).
+# `docker images` still lists the tag, but `docker image inspect <tag>` — which Sand Castle's docker
+# provider runs as a pre-flight (`--format {{.Config.User}}`) — fails to resolve the tag against an
+# index ("No such image"), so execute mode dies at sandbox start. Disabling the attestations AND
+# `--load` (which exports a single-platform image into the local image store) yield a tag that
+# `docker image inspect` resolves cleanly (#37).
 FROM debian:bookworm-slim
 
 # Toolchain Sand Castle needs regardless of language: git for the worktree/commits, curl + ca-certs
