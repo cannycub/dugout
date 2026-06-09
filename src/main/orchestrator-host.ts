@@ -23,7 +23,7 @@ import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
-import type { DraftOutcome, ExecutorPort } from "../core/ports/executor.js";
+import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
 
@@ -77,6 +77,24 @@ function fakeDraftSeed(): DraftOutcome | DraftOutcome[] {
     ];
   }
   return SEED_DRAFT;
+}
+
+/**
+ * Wrap the fake executor's execute so the e2e can drive the failed → restart-clean recovery path
+ * through real Electron IPC. With `DUGOUT_SEED_FAIL` set, the FIRST execute returns `red` (the story
+ * fails); the clean restart re-runs every spec to green. Sibling of the `DUGOUT_SEED_CLARIFY` seam —
+ * dev/test only, no effect on the shipped app (env unset).
+ */
+function fakeExecuteSeam(fake: FakeExecutor): (input: ExecuteInput) => Promise<ExecuteOutcome> {
+  if (!process.env["DUGOUT_SEED_FAIL"]) return (input) => fake.execute(input);
+  let failedOnce = false;
+  return (input) => {
+    if (!failedOnce) {
+      failedOnce = true;
+      return Promise.resolve({ result: "red", reason: "seed: simulated red on first attempt (DUGOUT_SEED_FAIL)" });
+    }
+    return fake.execute(input);
+  };
 }
 
 /**
@@ -150,11 +168,12 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     clearSpecBranch: (cwd, branch) => gitWorkspace.deleteBranch(cwd, branch),
     ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
+  const fakeExecute = fakeExecuteSeam(fake);
   const executor: ExecutorPort = {
     draft: (input) => draftExecutor.draft(input),
     execute:
       process.env["DUGOUT_EXECUTOR"] === "fakes"
-        ? (input) => fake.execute(input)
+        ? fakeExecute
         : (input) => kiroExecute.execute(input),
   };
 
