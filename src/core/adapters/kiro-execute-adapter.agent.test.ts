@@ -10,15 +10,24 @@ import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "./kiro-execute-ada
 import { kiroExecuteAgent } from "./kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../repo-config.js";
 import { GitWorkspace } from "./git-workspace.js";
+import { resolveSandboxImage, type RunCommand } from "./docker-image.js";
 
 const sh = promisify(execFile);
+
+/** Non-throwing docker CLI runner for image resolution (mirrors the orchestrator-host wiring). */
+const runDockerCli: RunCommand = (cmd, args) =>
+  new Promise((resolve) => {
+    execFile(cmd, args, (error, stdout) => {
+      resolve({ exitCode: error ? ((error as { code?: number }).code ?? 1) : 0, stdout });
+    });
+  });
 
 /**
  * Tier 3 — execute-mode agent integration against REAL kiro in a REAL Sand Castle (Docker) sandbox
  * (CLAUDE.md testing pyramid; #7, #33). Structurally excluded from `npm test` / CI (it's a
  * `*.agent.test.ts` file). Run with:
  *
- *   npm run build:sandbox      # build the node + dotnet images first (#37: refreshes stale tags)
+ *   npm run build:sandbox      # build the node + dotnet images (first run / after Dockerfile edits)
  *   npm run test:agent         # needs KIRO_API_KEY and a reachable Docker daemon
  *
  * Prerequisites FAIL LOUDLY, never skip — a skip reports green and gives false confidence the agent
@@ -57,9 +66,11 @@ function makeAdapter(clone: string) {
     createSandbox,
     // containerUid/Gid pinned to the image's baked `agent` uid (sandbox/Dockerfile.base), matching the
     // live wiring — Sand Castle's UID preflight otherwise expects the host uid and rejects.
-    sandboxFor: (toolchain: Toolchain, env) =>
+    sandboxFor: async (toolchain: Toolchain, env) =>
       docker({
-        imageName: `dugout-sandbox-${toolchain}:local`,
+        // Resolve tag → immutable ID like production: immune to the containerd stale-tag quirk that
+        // used to require a pre-emptive `npm run build:sandbox` before every agent run (#37).
+        imageName: await resolveSandboxImage(`dugout-sandbox-${toolchain}:local`, runDockerCli),
         containerUid: 1000,
         containerGid: 1000,
         env,

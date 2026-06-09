@@ -91,6 +91,14 @@ describe("KiroExecuteAdapter", () => {
     expect(f.runCalls).toHaveLength(3);
   });
 
+  it("awaits an async sandboxFor — image resolution may consult the docker CLI (#37)", async () => {
+    const f = fakeDeps({ runs: [report("pre"), kiroBuilt, report("pre")] });
+    f.deps.sandboxFor = async (toolchain, env) => ({ __image: `resolved-${toolchain}`, __env: env }) as any;
+    const out = await new KiroExecuteAdapter(f.deps).execute(baseInput);
+    expect(out).toEqual({ result: "green", branch: "spec/DUG-1/s1" });
+    expect(f.createCalls[0]).toMatchObject({ sandbox: { __image: "resolved-node" } });
+  });
+
   it("clears the spec branch before createSandbox so a restart re-forks clean (invariant 1)", async () => {
     const f = fakeDeps({ runs: [report(), kiroBuilt, report()] });
     await new KiroExecuteAdapter(f.deps).execute(baseInput);
