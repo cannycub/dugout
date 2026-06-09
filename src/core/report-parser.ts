@@ -21,13 +21,13 @@ export interface ReportParser {
  * first top-level `{…}` that parses *and* carries a `testResults` array, rather than assuming stdout
  * is pure JSON. Throws when none is found (operational — the suite did not report).
  */
-function extractVitestDoc(stdout: string): { testResults: VitestFile[] } {
+function extractVitestDoc(stdout: string): { testResults: VitestFile[]; success: boolean | undefined } {
   for (let i = stdout.indexOf("{"); i !== -1; i = stdout.indexOf("{", i + 1)) {
     const candidate = sliceBalancedObject(stdout, i);
     if (!candidate) continue;
     try {
-      const doc = JSON.parse(candidate) as { testResults?: VitestFile[] };
-      if (Array.isArray(doc.testResults)) return { testResults: doc.testResults };
+      const doc = JSON.parse(candidate) as { testResults?: VitestFile[]; success?: boolean };
+      if (Array.isArray(doc.testResults)) return { testResults: doc.testResults, success: doc.success };
     } catch {
       // Not the report object — keep scanning later `{`s.
     }
@@ -61,13 +61,34 @@ interface VitestFile {
 /** vitest `--reporter=json`: stable id = `file + full test name` (both durable across runs). */
 const vitestJsonParser: ReportParser = {
   failingIds(stdout) {
-    return extractVitestDoc(stdout).testResults.flatMap((file) =>
+    const doc = extractVitestDoc(stdout);
+    const ids = doc.testResults.flatMap((file) =>
       (file.assertionResults ?? [])
         .filter((a) => a.status === "failed")
         .map((a) => `${file.name} > ${a.fullName}`),
     );
+    // A parseable report can still represent a run that never validly completed: vitest sets
+    // `success: false` on a compile/collection/setup error and emits an EMPTY failing set (no test
+    // ran). Returning [] there would grade green though the suite never executed — the exact
+    // false-green invariant 8 forbids. Treat it as operational (ADR-0015 clause 6): the harness could
+    // not observe a clean run. A `success: false` WITH named failures is a normal red and passes through.
+    if (ids.length === 0 && doc.success === false) {
+      throw new Error(
+        "vitest reported success=false but named no failing test — the suite did not validly complete " +
+          "(likely a compile/collection error). This is an operational failure, not a green grade.",
+      );
+    }
+    return ids;
   },
 };
+
+/**
+ * vstest `UnitTestResult` outcomes that mean the test did not pass: an assertion failure (`Failed`),
+ * an unhandled exception (`Error`), a hang (`Timeout`), or a cancelled run (`Aborted`). `Passed`,
+ * `NotExecuted` (skipped), and `Inconclusive` are NOT counted — only `NotExecuted` would ever appear
+ * for a green-able run, and a skipped test is not a failure.
+ */
+const FAILING_OUTCOMES = new Set(["Failed", "Error", "Timeout", "Aborted"]);
 
 /** A `name="value"` (or single-quoted) attribute read off an element's opening tag. */
 function attr(tag: string, name: string): string | undefined {
@@ -98,7 +119,7 @@ const trxParser: ReportParser = {
     }
     const failing: string[] = [];
     for (const r of stdout.matchAll(/<UnitTestResult\b[^>]*\/?>/g)) {
-      if (attr(r[0]!, "outcome") !== "Failed") continue;
+      if (!FAILING_OUTCOMES.has(attr(r[0]!, "outcome") ?? "")) continue;
       const fqn = fqnById.get(attr(r[0]!, "testId") ?? "");
       if (fqn) failing.push(fqn);
     }

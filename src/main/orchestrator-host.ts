@@ -17,7 +17,7 @@ import { KiroDraftAdapter } from "../core/adapters/kiro-draft-adapter.js";
 import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { KiroExecuteAdapter } from "../core/adapters/kiro-execute-adapter.js";
+import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "../core/adapters/kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
@@ -168,6 +168,8 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
         // Inject the build agent's env (KIRO_API_KEY, …) at container launch — Sand Castle does not
         // apply agent env per-exec on the createSandbox path (ADR-0015 / kiro-execute-adapter).
         env,
+        // Don't tail-truncate the suite's report off stdout (Sand Castle defaults to 64 KiB).
+        maxOutputTailChars: REPORT_STDOUT_TAIL_CHARS,
       }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
     // The clone path (Sand Castle cwd), rescanning once if the cache is stale (ADR-0013). A

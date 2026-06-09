@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { KiroExecuteAdapter } from "./kiro-execute-adapter.js";
+import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "./kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "./kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../repo-config.js";
 import { GitWorkspace } from "./git-workspace.js";
@@ -58,7 +58,13 @@ function makeAdapter(clone: string) {
     // containerUid/Gid pinned to the image's baked `agent` uid (sandbox/Dockerfile.base), matching the
     // live wiring — Sand Castle's UID preflight otherwise expects the host uid and rejects.
     sandboxFor: (toolchain: Toolchain, env) =>
-      docker({ imageName: `dugout-sandbox-${toolchain}:local`, containerUid: 1000, containerGid: 1000, env }),
+      docker({
+        imageName: `dugout-sandbox-${toolchain}:local`,
+        containerUid: 1000,
+        containerGid: 1000,
+        env,
+        maxOutputTailChars: REPORT_STDOUT_TAIL_CHARS,
+      }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
     resolveClonePath: async () => clone,
     loadConfig: (cwd) => readRepoConfig(cwd, { readFile: (p) => readFile(p, "utf8") }),
@@ -157,8 +163,12 @@ const csRepo = (extra: Record<string, string>) => ({
   </ItemGroup>
 </Project>
 `,
+  // Delete any prior dugout.trx FIRST: the worktree persists across the baseline and after runs, so an
+  // after-run that writes no fresh TRX (a compile error → `dotnet test` produces none) would otherwise
+  // cat the stale baseline TRX and grade GREEN. With it deleted, that case cats nothing → the trx
+  // parser throws operational (loud), never a false green.
   ".dugout/config.yaml":
-    'testCommand: dotnet test --logger "trx;LogFileName=dugout.trx" >/dev/null 2>&1; find . -name dugout.trx -exec cat {} \\;\nreportFormat: trx\ntoolchain: dotnet\n',
+    'testCommand: find . -name dugout.trx -delete 2>/dev/null; dotnet test --logger "trx;LogFileName=dugout.trx" >/dev/null 2>&1; find . -name dugout.trx -exec cat {} \\;\nreportFormat: trx\ntoolchain: dotnet\n',
   "SmokeTests.cs": `using Xunit;\nnamespace Fixture;\npublic class SmokeTests { [Fact] public void Smoke() => Assert.True(true); }\n`,
   ...extra,
 });

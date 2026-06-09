@@ -9,9 +9,13 @@ import type { AgentProvider } from "@ai-hero/sandcastle";
  *
  * The command is forced to **`exit 0`**: Sand Castle's `run()` throws `AgentError` on a non-zero
  * exit, and a failing suite exits non-zero — so pass/fail must live entirely in the report the
- * command prints to stdout, never in the exit code (ADR-0015 clause 3). Each stdout line is echoed as
- * a `text` event so `RunResult.stdout` carries the whole report for the host-side `ReportParser`.
- * Sessions are not captured — there is no LLM session to resume.
+ * command prints to stdout, never in the exit code (ADR-0015 clause 3).
+ *
+ * `RunResult.stdout` is captured from the raw exec output by Sand Castle, independent of
+ * `parseStreamLine` (the parsed `text` events only feed completion-signal detection, which we don't
+ * use). `parseStreamLine` is a required `AgentProvider` method, so we give it a trivial line-as-text
+ * implementation; it has no effect on the report the host-side `ReportParser` reads. Sessions are not
+ * captured — there is no LLM session to resume.
  */
 export function commandRunnerAgent(testCommand: string): AgentProvider {
   return {

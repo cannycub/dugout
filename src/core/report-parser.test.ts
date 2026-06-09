@@ -41,6 +41,30 @@ describe("vitest-json ReportParser", () => {
   it("throws when stdout carries no parseable report (operational, not a green [])", () => {
     expect(() => reportParserFor("vitest-json").failingIds("command not found\n")).toThrow(/report/i);
   });
+
+  it("throws when vitest reports failure but names no failing test (compile/collection error, not a silent green)", () => {
+    // A test file that fails to import/compile: vitest exits non-zero (masked by the command-runner's
+    // forced exit 0) yet prints a PARSEABLE doc with success:false and an empty failing set. Returning
+    // [] here would grade green though the suite never ran — the exact false-green invariant 8 forbids.
+    const collectionError = JSON.stringify({ success: false, numFailedTests: 0, testResults: [] });
+    expect(() => reportParserFor("vitest-json").failingIds(collectionError)).toThrow(/did not|complete|fail/i);
+  });
+
+  it("still returns named failures when success is false WITH failing assertions (a normal red)", () => {
+    const realRed = JSON.stringify({
+      success: false,
+      testResults: [{ name: "a.test.ts", status: "failed", assertionResults: [{ fullName: "a breaks", status: "failed" }] }],
+    });
+    expect(reportParserFor("vitest-json").failingIds(realRed)).toEqual(["a.test.ts > a breaks"]);
+  });
+
+  it("returns [] for an all-green run reporting success:true", () => {
+    const ok = JSON.stringify({
+      success: true,
+      testResults: [{ name: "a.test.ts", status: "passed", assertionResults: [{ fullName: "a ok", status: "passed" }] }],
+    });
+    expect(reportParserFor("vitest-json").failingIds(ok)).toEqual([]);
+  });
 });
 
 /** A TRX with one failed + one passed result, joined to TestDefinitions by `testId`. The per-run
@@ -76,6 +100,18 @@ describe("trx ReportParser", () => {
   it("returns [] when every result passed", () => {
     const allPass = trx("x", "y").replace('outcome="Failed"', 'outcome="Passed"');
     expect(reportParserFor("trx").failingIds(allPass)).toEqual([]);
+  });
+
+  it("counts Error/Timeout/Aborted outcomes as failing, not only Failed (a test that throws/hangs)", () => {
+    for (const outcome of ["Error", "Timeout", "Aborted"]) {
+      const errored = trx("g1", "g2").replace('outcome="Failed"', `outcome="${outcome}"`);
+      expect(reportParserFor("trx").failingIds(errored)).toEqual(["MyApp.Tests.CalculatorTests.Add_ReturnsSum"]);
+    }
+  });
+
+  it("does not count NotExecuted (skipped) tests as failing", () => {
+    const skipped = trx("g1", "g2").replace('outcome="Failed"', 'outcome="NotExecuted"');
+    expect(reportParserFor("trx").failingIds(skipped)).toEqual([]);
   });
 
   it("throws when stdout carries no TRX (operational, not a green [])", () => {

@@ -8,6 +8,19 @@ import { commandRunnerAgent } from "./command-runner-agent.js";
 import { executeMethodology, AMBIGUITY_TAG, COMPLETION_TAG } from "./execute-methodology.js";
 import { stripAnsi } from "./kiro-runner.js";
 
+/** Idle window for the command-runner suite runs. A cold `npm install`/`dotnet restore` or a slow,
+ *  buffered compile can be silent past Sand Castle's 600s default and would otherwise throw. */
+export const COMMAND_RUNNER_IDLE_TIMEOUT_SECONDS = 1800;
+
+/**
+ * Max stdout retained per run, passed to the sandbox provider (`docker({ maxOutputTailChars })`).
+ * Sand Castle tail-bounds exec stdout (default 64 KiB), which would head-truncate a large suite's
+ * JSON/TRX report — evicting its opening `{`/`<TestRun>` token so the `ReportParser` can't find the
+ * report and throws operational on every big repo. The full report must reach the host, so the
+ * provider must raise this. 64 MiB is far above any realistic report yet well under V8's string cap.
+ */
+export const REPORT_STDOUT_TAIL_CHARS = 64 * 1024 * 1024;
+
 export interface KiroExecuteDeps {
   /** Injected Sandcastle createSandbox() — the test seam (ADR-0015 clause 2). */
   createSandbox: CreateSandbox;
@@ -107,9 +120,14 @@ export class KiroExecuteAdapter {
     });
     try {
       const runner = commandRunnerAgent(config.testCommand);
+      // A suite run can be legitimately silent for a long stretch — a cold `npm install` / `dotnet
+      // restore`, or a slow compile with buffered output — which would trip Sand Castle's default
+      // 600s idle timeout and turn a valid grade into an operational throw. Give the command-runner
+      // runs a generous idle window; kiro's build run streams continuously, so it keeps the default.
+      const suiteRun = { agent: runner, prompt: config.testCommand, idleTimeoutSeconds: COMMAND_RUNNER_IDLE_TIMEOUT_SECONDS };
 
       // 1) Baseline: the full suite on the seed, before any change (pre-existing reds — invariant 8).
-      const baseline = await sandbox.run({ agent: runner, prompt: config.testCommand });
+      const baseline = await sandbox.run(suiteRun);
 
       // 2) Build: kiro implements the spec test-first. It may refuse on a genuine ambiguity.
       const build = await sandbox.run({
@@ -126,7 +144,7 @@ export class KiroExecuteAdapter {
       // 3) After: the full suite again. The harness grades the diff — an unparseable report from
       //    either suite run means the harness could not run the suite and throws (operational, not
       //    red; ADR-0015 clause 6).
-      const after = await sandbox.run({ agent: runner, prompt: config.testCommand });
+      const after = await sandbox.run(suiteRun);
       const parser = reportParserFor(config.reportFormat);
       const graded = gradeExecuteRuns(parser, stripAnsi(baseline.stdout ?? ""), stripAnsi(after.stdout ?? ""));
       return graded.result === "green" ? { result: "green", branch: sandbox.branch } : graded;
