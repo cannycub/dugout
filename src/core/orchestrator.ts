@@ -138,10 +138,17 @@ export class Orchestrator {
       case "needs-info":
         // Terminal kickback: the ticket is too thin to spec. Nothing drafted, nothing persisted —
         // the developer enriches the ticket out of band (deeper lifecycle is a follow-up).
+        this.emitMetric({ name: "draft.needs_info", tags: { story: ticket.key } });
         return { outcome: "needs-info", reason: outcome.reason };
 
       case "needs-clarification":
         // The agent can spec but needs answers first; surface the questions for a re-draft.
+        // A clarification round is a near-perfect ticket-quality signal (invariant 9): rounds are
+        // 1-based and count this stop, so round N means the Nth set of questions.
+        this.emitMetric({
+          name: "draft.clarification_round",
+          tags: { story: ticket.key, round: (opts.clarifications?.length ?? 0) + 1 },
+        });
         return { outcome: "needs-clarification", questions: outcome.questions };
 
       case "drafted": {
@@ -177,6 +184,12 @@ export class Orchestrator {
         this.persistContent(story);
         this.persistRun(story);
         this.emitStory(story.key, "drafted");
+        const rounds = opts.clarifications?.length ?? 0;
+        if (rounds > 0) {
+          // Rounds-to-converge per ticket: pairs with draft.clarification_round (ticket-quality).
+          this.emitMetric({ name: "draft.clarification_converged", tags: { story: story.key, rounds } });
+        }
+        this.emitMetric({ name: "story.drafted", tags: { story: story.key, specs: specs.length } });
         return { outcome: "drafted", story };
       }
 
@@ -209,6 +222,15 @@ export class Orchestrator {
     this.persistContent(story);
     this.persistRun(story);
     this.emitStory(story.key, "approved");
+    this.emitMetric({
+      name: "story.approved",
+      tags: {
+        story: story.key,
+        specs: story.specs.length,
+        review_required: story.specs.filter((s) => s.reviewRequired).length,
+        replay: story.specs.filter((s) => s.isReplaySpec).length,
+      },
+    });
     return story;
   }
 
@@ -248,6 +270,7 @@ export class Orchestrator {
     story.status = "executing";
     this.persistRun(story);
     this.emitStory(story.key, "executing");
+    this.emitMetric({ name: "story.resumed_after_review", tags: { story: story.key } });
     return this.advanceFrom(story, next === -1 ? story.specs.length : next);
   }
 
@@ -271,6 +294,8 @@ export class Orchestrator {
     story.status = "executing";
     this.persistRun(story);
     this.emitStory(story.key, "executing");
+    // A clean restart is the dev correcting the agent — the code-level correction signal.
+    this.emitMetric({ name: "story.restarted", tags: { story: story.key } });
     return this.advanceFrom(story, failedIndex);
   }
 
@@ -346,6 +371,11 @@ export class Orchestrator {
         this.persistRun(story);
         this.emitSpec(story.key, spec.id, "failed");
         this.emitStory(story.key, "failed");
+        // The grade (red vs ambiguous) is the agent-correction discriminator at code level.
+        this.emitMetric({
+          name: "spec.failed",
+          tags: { story: story.key, repo: spec.repo, result: outcome.result },
+        });
         return story;
       }
       spec.status = "green";
@@ -373,6 +403,7 @@ export class Orchestrator {
     story.status = "dev-complete";
     this.persistRun(story);
     this.emitStory(story.key, "dev-complete");
+    this.emitMetric({ name: "story.dev_complete", tags: { story: story.key } });
     return story;
   }
 
