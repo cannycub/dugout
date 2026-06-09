@@ -65,3 +65,4 @@ playwright-report/
 .vscode/*
 !.vscode/extensions.json
 *.swp
+scheduled_tasks.lock

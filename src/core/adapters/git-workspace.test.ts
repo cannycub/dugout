@@ -53,3 +53,37 @@ describe("GitWorkspace.discover", () => {
     }
   });
 });
+
+const commit = (cwd: string) =>
+  run("git", ["-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x"], { cwd });
+
+describe("GitWorkspace.defaultBranch", () => {
+  it("returns the current branch for a local-only repo with no origin", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-db-local-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await commit(repo);
+      expect(await new GitWorkspace({ roots: [] }).defaultBranch(repo)).toBe("main");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the remote's default branch (origin/HEAD), NOT whatever is checked out", async () => {
+    const base = await mkdtemp(join(tmpdir(), "dugout-db-"));
+    const source = join(base, "source");
+    const clone = join(base, "clone");
+    try {
+      await mkdir(source);
+      await run("git", ["init", "-q", "-b", "main"], { cwd: source });
+      await commit(source);
+      await run("git", ["clone", "-q", source, clone]);
+      // The developer left the clone on a feature branch — the seed base must still be the remote
+      // default, not the accidentally-checked-out branch (#7 AC; PR review P1).
+      await run("git", ["-C", clone, "checkout", "-q", "-b", "feature/x"]);
+      expect(await new GitWorkspace({ roots: [] }).defaultBranch(clone)).toBe("main");
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});

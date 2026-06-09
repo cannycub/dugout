@@ -66,18 +66,32 @@ export interface ExecuteInput {
   specId: string;
   repo: string;
   markdown: string;
-  /** The per-repo story-branch HEAD the sandbox is seeded from. */
+  /**
+   * The per-repo story branch this spec belongs to (`dugout/<key>/<repo>`). It is the *intended*
+   * base the sandbox seeds from — but in v1 that branch is not yet materialised (the orchestrator's
+   * `merge()` is a stub; story-branch creation + accumulation are #8), so the adapter currently seeds
+   * from the clone HEAD and uses this only to namespace the produced branch. Seeding from the
+   * story-branch HEAD is tracked in the execute-branch-model follow-up (#34).
+   */
   storyBranch: string;
 }
 
 /**
- * Outcome of an execute-mode run. `green` = TDD red→green with the full suite passing
- * (pre-existing reds baselined). `ambiguous` = genuine mid-build ambiguity; the spec fails
- * and must be restarted clean (the agent never guesses — invariant 1).
+ * Outcome of an execute-mode run for one spec (ADR-0011; glossary "Execute outcome"):
+ *  - `green`     — the per-spec green gate is met (invariant 8): the full suite passes in the
+ *                  sandbox, pre-existing reds baselined. `branch` is the produced spec branch.
+ *  - `ambiguous` — the agent hit a fork it cannot resolve without guessing and refused to proceed
+ *                  (build-time analogue of `needs-clarification`); the dev re-clarifies, then the
+ *                  spec clean-restarts.
+ *  - `red`       — the agent completed *without* ambiguity but the green gate is not met (or the
+ *                  test report was missing/unparseable — `reason` says so); nothing to clarify,
+ *                  retry/investigate.
+ * Any non-green outcome fails the spec and the story for a clean restart, never a resume (inv. 1).
  */
 export type ExecuteOutcome =
   | { result: "green"; branch: string }
-  | { result: "ambiguous"; reason: string };
+  | { result: "ambiguous"; reason: string }
+  | { result: "red"; reason: string };
 
 export interface ExecutorPort {
   /** Analyse ticket + declared repos (read-only) and produce a draft outcome (ADR-0007). */

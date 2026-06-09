@@ -58,6 +58,14 @@ HTTP later), never to Electron directly.
 Electron · React · headless kiro (executor) · Sand Castle (sandboxes) · SQLite (run-state) ·
 Jira · Datadog · AWS Athena (replay output, v1.5+).
 
+## Testing
+
+`npm test` runs the unit suite; `npm run test:e2e` drives the UI against the fakes. The agent
+integration tier (`npm run test:agent`) runs against real kiro and is excluded from CI. Execute-mode
+agent tests additionally need a running Docker daemon and the Sand Castle sandbox image — build it
+once with `npm run build:sandbox` (which disables buildx provenance/SBOM attestations so the image
+tag resolves under Docker Desktop's containerd store; see `sandbox/Dockerfile`).
+
 ## Status
 
 Early design. The v1 PRD is [issue #1](https://github.com/cannycub/dugout/issues/1).

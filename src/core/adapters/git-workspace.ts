@@ -23,6 +23,33 @@ export class GitWorkspace implements WorkspacePort {
     return this.config.roots;
   }
 
+  /**
+   * The branch an execute-mode sandbox should seed from (#7 AC: "seeded from a base branch", not from
+   * whatever the clone happens to have checked out — PR review P1). Prefers the remote's default
+   * (`origin/HEAD`), which `git clone` sets, so the seed is deterministic regardless of the clone's
+   * current branch; falls back to the current branch for a local-only repo with no origin.
+   *
+   * Note: this is the v1 base. Seeding spec N from the *updated story-branch HEAD* (accumulation) is
+   * the #8/#34 follow-up; here every spec seeds from the repo's default branch.
+   */
+  async defaultBranch(path: string): Promise<string> {
+    try {
+      const { stdout } = await run("git", [
+        "-C",
+        path,
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+      ]);
+      const ref = stdout.trim();
+      if (ref) return ref.replace(/^origin\//, "");
+    } catch {
+      // No origin/HEAD (local-only repo) — fall through to the current branch.
+    }
+    const { stdout } = await run("git", ["-C", path, "rev-parse", "--abbrev-ref", "HEAD"]);
+    return stdout.trim();
+  }
+
   async discover(roots: string[]): Promise<DiscoveredClone[]> {
     const clones: DiscoveredClone[] = [];
     for (const root of roots) {
