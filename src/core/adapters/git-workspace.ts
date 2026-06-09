@@ -120,6 +120,15 @@ export class GitWorkspace implements WorkspacePort {
     }
   }
 
+  /**
+   * Push a local branch to `origin` (#10): the single end-of-story push. A git operation on the
+   * clone's own remote/credentials — the GitHub REST adapter delegates here because the API cannot
+   * push a local branch. Failure surfaces as an operational error (fix auth/remote, retry).
+   */
+  async pushBranch(path: string, branch: string): Promise<void> {
+    await run("git", ["-C", path, "push", "origin", branch]);
+  }
+
   async discover(roots: string[]): Promise<DiscoveredClone[]> {
     const clones: DiscoveredClone[] = [];
     for (const root of roots) {

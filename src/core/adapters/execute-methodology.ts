@@ -10,10 +10,17 @@ export const COMPLETION_TAG = "promise";
  * failing sets host-side (invariant 8; ADR-0015). kiro runs --no-interactive and never blocks for
  * input; genuine mid-build ambiguity is an explicit escape hatch, never a guess (invariant 1).
  */
-export function executeMethodology(spec: { markdown: string }): string {
+export function executeMethodology(spec: { markdown: string; specId?: string }): string {
   return [
     "You are implementing ONE single-repo spec inside a sandboxed clone. Follow strict red→green TDD:",
     "write a failing test first, then the minimal code to pass it, refactor, repeat.",
+    ...(spec.specId
+      ? [
+          "",
+          `Start EVERY commit subject with "[${spec.specId}]" — the spec id carries the story id, so`,
+          "each commit traces end-to-end from Jira through the PR (ID-stamped commits).",
+        ]
+      : []),
     "",
     "When the spec is fully implemented and its tests pass, emit <promise>COMPLETE</promise> and stop.",
     "You do NOT need to report test results — the harness runs the suite and grades it for you.",

@@ -132,7 +132,7 @@ export class KiroExecuteAdapter {
       // 2) Build: kiro implements the spec test-first. It may refuse on a genuine ambiguity.
       const build = await sandbox.run({
         agent: buildAgent,
-        prompt: executeMethodology({ markdown: input.markdown }),
+        prompt: executeMethodology({ markdown: input.markdown, specId: input.specId }),
       });
       // kiro emits ANSI even with NO_COLOR when piped (#8352) — strip before tag parsing.
       const reason = ambiguityReason(stripAnsi(build.stdout ?? ""));

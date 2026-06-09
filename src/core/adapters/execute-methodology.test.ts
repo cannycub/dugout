@@ -41,3 +41,11 @@ describe("executeMethodology — non-functional directives (#12)", () => {
     expect(prompt).toMatch(/never (weaken|disable|remove)/i);
   });
 });
+
+describe("executeMethodology — ID-stamped commits (#10)", () => {
+  it("directs the agent to prefix every commit subject with the spec id", () => {
+    const prompt = executeMethodology({ markdown: "# Spec", specId: "DUG-1-spec-2" });
+    expect(prompt).toContain('"[DUG-1-spec-2]"');
+    expect(prompt).toMatch(/every commit subject/i);
+  });
+});

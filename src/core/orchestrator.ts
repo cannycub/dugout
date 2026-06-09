@@ -594,10 +594,42 @@ function assemble(content: StorySpecs, run: StoryRunState): Story {
   return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
 }
 
-/** Fully-linked PR body: story id + the specs (and their AC) that landed in this repo. */
+/**
+ * Fully-linked PR body (#10): maximum context for the peer reviewer — the story, every spec that
+ * landed in this repo (flags + resting status + the full canonical markdown, which carries the AC
+ * mapping and test plan), and what the per-spec green actually proved.
+ */
 function prBody(story: Story, repoSpecs: Spec[]): string {
-  const specList = repoSpecs
-    .map((s) => `- \`${s.id}\`${s.isReplaySpec ? " (replay spec)" : ""}`)
+  const summary = repoSpecs
+    .map(
+      (s) =>
+        `- \`${s.id}\` — ${s.status}` +
+        `${s.isReplaySpec ? " · replay spec" : ""}${s.reviewRequired ? " · review-required" : ""}`,
+    )
     .join("\n");
-  return [`Story: ${story.key} — ${story.title}`, "", "Specs in this PR:", specList].join("\n");
+  const specSections = repoSpecs
+    .map((s) =>
+      [
+        `<details><summary><code>${s.id}</code> — full spec (AC mapping + test plan)</summary>`,
+        "",
+        s.markdown,
+        "",
+        "</details>",
+      ].join("\n"),
+    )
+    .join("\n\n");
+  return [
+    `Story: ${story.key} — ${story.title}`,
+    "",
+    "Specs in this PR:",
+    summary,
+    "",
+    "Test results: each spec merged at green — the full local suite passed over the pre-existing-",
+    "failure baseline, observed by the harness in the sandbox (never self-reported by the agent).",
+    "One `--no-ff` merge bubble per spec on this branch; commits are stamped with the spec id.",
+    "",
+    specSections,
+    "",
+    "_Opened by Dugout. Never auto-merged — the merge decision is yours (peer review)._",
+  ].join("\n");
 }
