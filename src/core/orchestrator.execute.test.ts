@@ -42,6 +42,21 @@ describe("execute mode", () => {
     expect(story.status).toBe("dev-complete");
   });
 
+  it("merges each green spec into its per-repo story branch, once, in fixed order (ADR-0014)", async () => {
+    const { orchestrator, mergeCalls } = setup([
+      { repo: "web", markdown: "# Spec A" },
+      { repo: "api", markdown: "# Spec B" },
+    ]);
+    await draftAndApprove(orchestrator, ["web", "api"]);
+
+    await orchestrator.runStory("DUG-1");
+
+    expect(mergeCalls).toEqual([
+      { repo: "web", storyKey: "DUG-1", specId: "DUG-1-spec-1" },
+      { repo: "api", storyKey: "DUG-1", specId: "DUG-1-spec-2" },
+    ]);
+  });
+
   it("passes the story key and the orchestrator-resolved base branch into execute (ADR-0013)", async () => {
     const resolveCalls: Array<[string, string]> = [];
     const { orchestrator, executor } = makeHarness({
@@ -62,6 +77,26 @@ describe("execute mode", () => {
       storyKey: "DUG-1",
       baseBranch: "story/DUG-1",
     });
+  });
+
+  it("treats a failed story-branch merge as an operational error: unwinds to failed and rethrows (ADR-0014)", async () => {
+    // A merge can't conflict in serial v1 (the spec branch always descends from story HEAD), so a
+    // failure signals out-of-band manual git — mechanical, not a spec grade. The spec already graded
+    // green, so it must NOT become red/ambiguous; instead the story unwinds to a restartable failed.
+    const { orchestrator } = makeHarness({
+      tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
+      draft: [{ repo: "web", markdown: "# Spec A" }],
+      mergeToStoryBranch: async () => {
+        throw new Error("merge conflict in story/DUG-1 (out-of-band git state)");
+      },
+    });
+    await draftAndApprove(orchestrator, ["web"]);
+
+    await expect(orchestrator.runStory("DUG-1")).rejects.toThrow(/merge conflict/i);
+
+    const story = orchestrator.getStory("DUG-1")!;
+    expect(story.status).toBe("failed");
+    expect(story.specs[0]!.status).toBe("failed");
   });
 
   it("does not wedge the story when execute throws an operational error; marks it failed and rethrows", async () => {

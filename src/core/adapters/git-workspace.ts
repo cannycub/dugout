@@ -85,6 +85,32 @@ export class GitWorkspace implements WorkspacePort {
     }
   }
 
+  /**
+   * Merge a green spec's branch into the per-repo story branch, locally (CONTEXT.md "Story branch";
+   * ADR-0014). Creates `story/<storyKey>` from the repo default the first time (lazily, on the first
+   * green merge — a story that fails before any green leaves no empty story branch), then merges
+   * `spec/<storyKey>/<specId>` into it with `--no-ff` so each spec lands as one legible merge bubble
+   * for the eventual PR reviewer.
+   *
+   * In serial v1 the spec branch is always a descendant of the current story HEAD (nothing else
+   * writes the story branch between a spec's fork and its merge), so the merge always fast-forwards;
+   * `--no-ff` forces the merge commit anyway. A conflict is therefore impossible in normal flow — if
+   * the merge fails it signals out-of-band manual git, which surfaces as an operational error the
+   * orchestrator unwinds to a restartable `failed` state (ADR-0014).
+   */
+  async mergeIntoStoryBranch(path: string, storyKey: string, specId: string): Promise<void> {
+    const story = `story/${storyKey}`;
+    const spec = `spec/${storyKey}/${specId}`;
+    const exists = await run("git", ["-C", path, "rev-parse", "--verify", "--quiet", `refs/heads/${story}`])
+      .then(() => true)
+      .catch(() => false);
+    if (!exists) {
+      await run("git", ["-C", path, "branch", story, await this.defaultBranch(path)]);
+    }
+    await run("git", ["-C", path, "checkout", "-q", story]);
+    await run("git", ["-C", path, "merge", "--no-ff", "--no-edit", "-m", `Merge ${spec}`, spec]);
+  }
+
   async discover(roots: string[]): Promise<DiscoveredClone[]> {
     const clones: DiscoveredClone[] = [];
     for (const root of roots) {

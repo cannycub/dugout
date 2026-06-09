@@ -136,6 +136,65 @@ describe("GitWorkspace.seedBranch", () => {
   });
 });
 
+describe("GitWorkspace.mergeIntoStoryBranch", () => {
+  const branches = async (cwd: string) =>
+    (await run("git", ["-C", cwd, "branch", "--format=%(refname:short)"])).stdout
+      .split("\n")
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+  // Build a clone whose default branch `main` has one commit, then fork a spec branch off it with
+  // its own file commit — the shape Sand Castle leaves behind after a green run (the spec branch
+  // lives in the clone, ADR-0013).
+  const seedSpecBranch = async (repo: string, specBranch: string, file: string) => {
+    await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    await commit(repo);
+    await run("git", ["-C", repo, "checkout", "-q", "-b", specBranch]);
+    await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", file]);
+    await run("git", ["-C", repo, "checkout", "-q", "main"]);
+  };
+
+  it("creates the story branch from the repo default and merges the first spec --no-ff", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-"));
+    try {
+      await seedSpecBranch(repo, "spec/DUG-1/s1", "spec-1 work");
+      await new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1");
+
+      // The story branch now exists and carries the spec's commit.
+      expect(await branches(repo)).toContain("story/DUG-1");
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).toContain("spec-1 work");
+      // --no-ff: an explicit merge commit (two parents) tops the story branch (ADR-0014).
+      const head = await run("git", ["-C", repo, "rev-list", "--merges", "-1", "story/DUG-1"]);
+      expect(head.stdout.trim()).not.toBe("");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("accumulates a second spec onto the existing story branch (specs 1..N stack)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-acc-"));
+    try {
+      const ws = new GitWorkspace({ roots: [] });
+      await seedSpecBranch(repo, "spec/DUG-1/s1", "spec-1 work");
+      await ws.mergeIntoStoryBranch(repo, "DUG-1", "s1");
+
+      // Spec 2 forks from the accumulated story HEAD (what resolveBaseBranch yields once #8 lands),
+      // adds its own commit, and merges back — the second spec stacks on the first.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s2", "story/DUG-1"]);
+      await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "spec-2 work"]);
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+      await ws.mergeIntoStoryBranch(repo, "DUG-1", "s2");
+
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).toContain("spec-1 work");
+      expect(storyLog).toContain("spec-2 work");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("GitWorkspace.defaultBranch", () => {
   it("returns the current branch for a local-only repo with no origin", async () => {
     const repo = await mkdtemp(join(tmpdir(), "dugout-db-local-"));

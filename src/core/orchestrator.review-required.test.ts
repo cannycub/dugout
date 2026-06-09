@@ -15,21 +15,23 @@ async function setupWithReviewRequiredFirstSpec() {
 }
 
 describe("review-required stop", () => {
-  it("stops after a review-required spec goes green, before the next spec stacks", async () => {
-    const { orchestrator, executor } = await setupWithReviewRequiredFirstSpec();
+  it("merges the review-required spec at green, then stops before the next spec runs (ADR-0014)", async () => {
+    const { orchestrator, executor, mergeCalls } = await setupWithReviewRequiredFirstSpec();
 
     const story = await orchestrator.runStory("DUG-1");
 
     expect(story.status).toBe("awaiting-review");
-    // The review-required spec is green but NOT yet merged — the dev reviews the code first.
-    expect(story.specs[0]!.status).toBe("green");
-    // The next spec has not run; nothing stacks on unreviewed code.
+    // Model B: the spec is merged into the story branch AT green; the dev reviews the integrated
+    // result on the story branch (the surface that becomes the PR), not an isolated spec branch.
+    expect(story.specs[0]!.status).toBe("merged");
+    expect(mergeCalls).toEqual([{ repo: "web", storyKey: "DUG-1", specId: "DUG-1-spec-1" }]);
+    // The next spec has not run; nothing stacks until the dev resumes.
     expect(story.specs[1]!.status).toBe("approved");
     expect(executor.executeCalls.map((c) => c.specId)).toEqual(["DUG-1-spec-1"]);
   });
 
-  it("resumes after review: merges the reviewed spec and runs the rest to dev-complete", async () => {
-    const { orchestrator, executor } = await setupWithReviewRequiredFirstSpec();
+  it("resumes after review: runs the rest to dev-complete WITHOUT re-merging the reviewed spec", async () => {
+    const { orchestrator, executor, mergeCalls } = await setupWithReviewRequiredFirstSpec();
     await orchestrator.runStory("DUG-1");
 
     const story = await orchestrator.resumeAfterReview("DUG-1");
@@ -40,5 +42,7 @@ describe("review-required stop", () => {
       "DUG-1-spec-1",
       "DUG-1-spec-2",
     ]);
+    // spec-1 was merged at the stop (not again on resume); resume only merges spec-2.
+    expect(mergeCalls.map((c) => c.specId)).toEqual(["DUG-1-spec-1", "DUG-1-spec-2"]);
   });
 });

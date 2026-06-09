@@ -37,6 +37,12 @@ export interface HarnessOptions {
   execute?: Record<string, ExecuteOutcome>;
   /** Base-branch resolver the orchestrator passes into execute(); defaults to a fake returning "main". */
   resolveBaseBranch?: (repo: string, storyKey: string) => Promise<string>;
+  /**
+   * Story-branch merge the orchestrator invokes when a spec goes green (ADR-0014). Defaults to a
+   * recording no-op (no real git) — exposed as `mergeCalls` for assertions. Pass an override to
+   * exercise an operational merge failure (the unwind-to-failed backstop).
+   */
+  mergeToStoryBranch?: (repo: string, storyKey: string, specId: string) => Promise<void>;
   /** Run-state store override; defaults to a fresh in-memory store. */
   store?: RunStateStore;
   /** Spec content store override; defaults to a fresh in-memory store. */
@@ -67,8 +73,14 @@ export function makeHarness(options: HarnessOptions) {
   const store = options.store ?? new InMemoryRunStateStore();
   const specStore = options.specStore ?? new InMemorySpecStore();
   const resolveBaseBranch = options.resolveBaseBranch ?? (async () => "main");
-  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, store, specStore, resolveBaseBranch });
-  return { orchestrator, jira, executor, github, metrics, envReplay, store, specStore };
+  const mergeCalls: Array<{ repo: string; storyKey: string; specId: string }> = [];
+  const mergeToStoryBranch =
+    options.mergeToStoryBranch ??
+    (async (repo: string, storyKey: string, specId: string) => {
+      mergeCalls.push({ repo, storyKey, specId });
+    });
+  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, store, specStore, resolveBaseBranch, mergeToStoryBranch });
+  return { orchestrator, jira, executor, github, metrics, envReplay, store, specStore, mergeCalls };
 }
 
 /**
