@@ -50,7 +50,7 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
     // git dir at the path we hand it, so a non-canonical path leaves the in-container gitdir
     // reference unmounted ("not a git repository"). Pass the resolved path so the mounts line up.
     clone = await realpath(await mkdtemp(join(tmpdir(), "dugout-exec-")));
-    await sh("git", ["init", "-q"], { cwd: clone });
+    await sh("git", ["init", "-q", "-b", "main"], { cwd: clone });
     await writeFile(
       join(clone, "package.json"),
       JSON.stringify({ name: "x", scripts: { test: "node --test" } }),
@@ -71,6 +71,7 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
       sandbox: docker({ imageName: "dugout-sandbox:local", containerUid: 1000, containerGid: 1000 }),
       makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
       resolveClonePath: async () => clone,
+      resolveBaseBranch: async () => "main",
     });
     const out = await adapter.execute({
       specId: "s1",

@@ -20,6 +20,7 @@ const deps = (run: SandcastleRun) => ({
   sandbox: { __fake: "sandbox" } as any,
   makeAgent: () => ({ name: "kiro" }) as any,
   resolveClonePath: async (_repo: string) => "/ws/api",
+  resolveBaseBranch: async (_repo: string) => "main",
   // Inject the key so the unit tier is hermetic (runs through fakes with no secret in the env) —
   // the default `npm test`/CI must not require KIRO_API_KEY (CLAUDE.md testing pyramid).
   apiKey: "k-test",
@@ -38,9 +39,14 @@ describe("KiroExecuteAdapter", () => {
     });
     const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
     expect(out).toEqual({ result: "green", branch: "dugout/DUG-1/api/s1" });
-    // seeds from the story branch, cwd is the resolved clone, branch strategy names the spec branch
+    // cwd is the resolved clone; the spec branch is named + seeded from the resolved base branch
+    // (deterministic, not the clone's checked-out HEAD — #7 AC / PR review P1).
     expect(calls[0].cwd).toBe("/ws/api");
-    expect(calls[0].branchStrategy).toEqual({ type: "branch", branch: "dugout/DUG-1/api/s1" });
+    expect(calls[0].branchStrategy).toEqual({
+      type: "branch",
+      branch: "dugout/DUG-1/api/s1",
+      baseBranch: "main",
+    });
   });
 
   it("returns red when the report shows a new failure", async () => {

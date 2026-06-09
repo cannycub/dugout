@@ -17,6 +17,12 @@ export interface KiroExecuteDeps {
   makeAgent: (apiKey: string) => AgentProvider;
   /** Resolve a declared repo name to its local clone path (Sandcastle cwd). */
   resolveClonePath: (repo: string) => Promise<string>;
+  /**
+   * Resolve the deterministic base branch the sandbox seeds from (#7 AC: "seeded from a base
+   * branch", not the clone's accidentally-checked-out HEAD). v1 = the repo's default branch; seeding
+   * from the updated story-branch HEAD (accumulation) is the #8/#34 follow-up.
+   */
+  resolveBaseBranch: (repo: string) => Promise<string>;
   /** kiro api key source; defaults to process.env.KIRO_API_KEY. */
   apiKey?: string;
 }
@@ -78,15 +84,18 @@ export class KiroExecuteAdapter {
       throw new Error("execute mode needs KIRO_API_KEY (kiro.dev/docs/cli/headless).");
     }
     const cwd = await this.deps.resolveClonePath(input.repo);
+    const baseBranch = await this.deps.resolveBaseBranch(input.repo);
     const specBranch = `${input.storyBranch}/${input.specId}`;
 
     // run() throwing is an operational failure (sandbox/docker/kiro infra) — let it propagate.
+    // baseBranch makes the seed deterministic (the repo's default branch), not the clone's
+    // accidentally-checked-out HEAD (#7 AC; PR review P1).
     const result = await this.deps.run({
       agent: this.deps.makeAgent(apiKey),
       sandbox: this.deps.sandbox,
       cwd,
       prompt: executeMethodology({ markdown: input.markdown }),
-      branchStrategy: { type: "branch", branch: specBranch },
+      branchStrategy: { type: "branch", branch: specBranch, baseBranch },
     } as never);
 
     // kiro emits ANSI even with NO_COLOR when piped (#8352, as the draft runner documents), which

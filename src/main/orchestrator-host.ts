@@ -101,10 +101,19 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
   const creds = saved ?? jiraCredentialsFromEnv();
   if (creds) jira = new JiraReadAdapter(creds);
 
-  const repoScope = new RepoScope(
-    new GitHubCatalog(github),
-    new GitWorkspace({ roots: workspaceRoots() }),
-  );
+  const gitWorkspace = new GitWorkspace({ roots: workspaceRoots() });
+  const repoScope = new RepoScope(new GitHubCatalog(github), gitWorkspace);
+
+  // Resolve a declared repo name to its local clone path, failing loudly if it isn't cloned. Shared
+  // by the execute adapter's `resolveClonePath` (the sandbox cwd) and `resolveBaseBranch` (the
+  // deterministic seed branch) so both go through one declare() rather than each declaring twice.
+  const clonePathFor = async (repo: string): Promise<string> => {
+    const [declared] = await repoScope.declare([repo]);
+    if (!declared || declared.clone.status !== "cloned") {
+      throw new Error(`execute mode needs a local clone of "${repo}" (not cloned).`);
+    }
+    return declared.clone.path;
+  };
 
   // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
   // main process — both kiro adapters take it explicitly rather than reading process.env lazily, so a
@@ -145,13 +154,8 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
       containerGid: 1000,
     }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
-    resolveClonePath: async (repo) => {
-      const [declared] = await repoScope.declare([repo]);
-      if (!declared || declared.clone.status !== "cloned") {
-        throw new Error(`execute mode needs a local clone of "${repo}" (not cloned).`);
-      }
-      return declared.clone.path;
-    },
+    resolveClonePath: clonePathFor,
+    resolveBaseBranch: async (repo) => gitWorkspace.defaultBranch(await clonePathFor(repo)),
     ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
   const executor: ExecutorPort = {
