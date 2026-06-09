@@ -104,17 +104,6 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
   const gitWorkspace = new GitWorkspace({ roots: workspaceRoots() });
   const repoScope = new RepoScope(new GitHubCatalog(github), gitWorkspace);
 
-  // Resolve a declared repo name to its local clone path, failing loudly if it isn't cloned. Shared
-  // by the execute adapter's `resolveClonePath` (the sandbox cwd) and `resolveBaseBranch` (the
-  // deterministic seed branch) so both go through one declare() rather than each declaring twice.
-  const clonePathFor = async (repo: string): Promise<string> => {
-    const [declared] = await repoScope.declare([repo]);
-    if (!declared || declared.clone.status !== "cloned") {
-      throw new Error(`execute mode needs a local clone of "${repo}" (not cloned).`);
-    }
-    return declared.clone.path;
-  };
-
   // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
   // main process — both kiro adapters take it explicitly rather than reading process.env lazily, so a
   // GUI-launched app (which doesn't inherit a shell's exports) can still reach kiro. undefined ⇒ the
@@ -154,8 +143,11 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
       containerGid: 1000,
     }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
-    resolveClonePath: clonePathFor,
-    resolveBaseBranch: async (repo) => gitWorkspace.defaultBranch(await clonePathFor(repo)),
+    // The clone path (Sand Castle cwd), rescanning once if the cache is stale (ADR-0013). A
+    // genuinely-missing clone throws — an operational error the orchestrator unwinds cleanly.
+    resolveClonePath: (repo) => repoScope.resolveClonePath(repo),
+    // Re-fork the spec branch clean each run so a restart never resumes a failed attempt (invariant 1).
+    clearSpecBranch: (cwd, branch) => gitWorkspace.deleteBranch(cwd, branch),
     ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
   const executor: ExecutorPort = {
@@ -175,6 +167,17 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     specStore: new InMemorySpecStore(),
     store: openRunStateStore(userDataDir),
     repoScope,
+    // Seed each spec from the per-repo story branch's HEAD if it exists, else the repo default
+    // (ADR-0013). Today the story branch is never materialised, so this is always the default — once
+    // #8 creates and accumulates `story/<key>`, the same resolver seeds spec N from the accumulated
+    // HEAD with no further change here. Gated by the same fakes seam as `execute`: under
+    // `DUGOUT_EXECUTOR=fakes` there is no real clone on disk (e2e), so base resolution must NOT touch
+    // the filesystem — it returns a placeholder the fake executor ignores.
+    resolveBaseBranch:
+      process.env["DUGOUT_EXECUTOR"] === "fakes"
+        ? async () => "main"
+        : async (repo, storyKey) =>
+            gitWorkspace.seedBranch(await repoScope.resolveClonePath(repo), `story/${storyKey}`),
   });
   return orchestrator;
 }

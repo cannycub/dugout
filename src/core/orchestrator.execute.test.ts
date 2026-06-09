@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness, draftAndApprove } from "./test-harness.js";
-import type { DraftedSpec } from "./ports/executor.js";
+import { makeHarness, draftAndApprove, declared } from "./test-harness.js";
+import { Orchestrator } from "./orchestrator.js";
+import { FakeJira } from "./fakes/fake-jira.js";
+import { FakeGitHub } from "./fakes/fake-github.js";
+import { FakeMetrics } from "./fakes/fake-metrics.js";
+import { FakeEnvReplay } from "./fakes/fake-env-replay.js";
+import type { DraftedSpec, ExecutorPort } from "./ports/executor.js";
 
 function setup(draftedSpecs: DraftedSpec[]) {
   return makeHarness({
@@ -35,5 +40,55 @@ describe("execute mode", () => {
     ]);
     expect(story.specs.map((s) => s.status)).toEqual(["merged", "merged"]);
     expect(story.status).toBe("dev-complete");
+  });
+
+  it("passes the story key and the orchestrator-resolved base branch into execute (ADR-0013)", async () => {
+    const resolveCalls: Array<[string, string]> = [];
+    const { orchestrator, executor } = makeHarness({
+      tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
+      draft: [{ repo: "web", markdown: "# Spec A" }],
+      resolveBaseBranch: async (repo, storyKey) => {
+        resolveCalls.push([repo, storyKey]);
+        return `story/${storyKey}`; // pretend a story branch already exists (the #8 accumulation case)
+      },
+    });
+    await draftAndApprove(orchestrator, ["web"]);
+    await orchestrator.runStory("DUG-1");
+
+    expect(resolveCalls).toEqual([["web", "DUG-1"]]);
+    expect(executor.executeCalls[0]).toMatchObject({
+      specId: "DUG-1-spec-1",
+      repo: "web",
+      storyKey: "DUG-1",
+      baseBranch: "story/DUG-1",
+    });
+  });
+
+  it("does not wedge the story when execute throws an operational error; marks it failed and rethrows", async () => {
+    // A missing clone / Docker-down is an operational error (ADR-0011 §4), not a spec red. The
+    // orchestrator must not leave the spec `running` / story `executing` (an unhandled rejection
+    // mid-loop) — it unwinds to a restartable `failed` state and rethrows so the dev sees the cause.
+    const throwingExecutor: ExecutorPort = {
+      draft: async () => ({ result: "drafted", specs: [{ repo: "web", markdown: "# A" }] }),
+      execute: async () => {
+        throw new Error("execute mode needs a local clone of \"web\" (not cloned).");
+      },
+    };
+    const orchestrator = new Orchestrator({
+      jira: new FakeJira({ tickets: [{ key: "DUG-1", title: "Add widget", description: "AC" }] }),
+      executor: throwingExecutor,
+      github: new FakeGitHub(),
+      metrics: new FakeMetrics(),
+      envReplay: new FakeEnvReplay(),
+      resolveBaseBranch: async () => "main",
+    });
+    await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
+    await orchestrator.approveStory("DUG-1", {});
+
+    await expect(orchestrator.runStory("DUG-1")).rejects.toThrow(/not cloned/i);
+
+    const story = orchestrator.getStory("DUG-1")!;
+    expect(story.status).toBe("failed");
+    expect(story.specs[0]!.status).toBe("failed");
   });
 });

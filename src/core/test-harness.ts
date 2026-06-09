@@ -35,6 +35,8 @@ export interface HarnessOptions {
   drafts?: DraftOutcome[];
   /** Per-spec execute outcomes (specs not listed default to green). */
   execute?: Record<string, ExecuteOutcome>;
+  /** Base-branch resolver the orchestrator passes into execute(); defaults to a fake returning "main". */
+  resolveBaseBranch?: (repo: string, storyKey: string) => Promise<string>;
   /** Run-state store override; defaults to a fresh in-memory store. */
   store?: RunStateStore;
   /** Spec content store override; defaults to a fresh in-memory store. */
@@ -64,7 +66,8 @@ export function makeHarness(options: HarnessOptions) {
   const envReplay = new FakeEnvReplay();
   const store = options.store ?? new InMemoryRunStateStore();
   const specStore = options.specStore ?? new InMemorySpecStore();
-  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, store, specStore });
+  const resolveBaseBranch = options.resolveBaseBranch ?? (async () => "main");
+  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, store, specStore, resolveBaseBranch });
   return { orchestrator, jira, executor, github, metrics, envReplay, store, specStore };
 }
 

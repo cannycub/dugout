@@ -35,6 +35,13 @@ export interface OrchestratorDeps {
   store?: RunStateStore;
   /** Catalog + clone discovery for the declare-repos step (Part A). Optional in tests. */
   repoScope?: RepoScope;
+  /**
+   * Resolve the base branch a spec's sandbox seeds (forks) from: the story branch
+   * `story/<storyKey>` if it exists in the repo's clone, else the repo default (ADR-0013). The host
+   * injects the real resolver (GitWorkspace-backed); absent ⇒ a benign `"main"` default for the
+   * fake-executor unit path, where the value is unused.
+   */
+  resolveBaseBranch?: (repo: string, storyKey: string) => Promise<string>;
 }
 
 /**
@@ -287,12 +294,29 @@ export class Orchestrator {
       const spec = story.specs[i]!;
       spec.status = "running";
       this.persistRun(story);
-      const outcome = await this.deps.executor.execute({
-        specId: spec.id,
-        repo: spec.repo,
-        markdown: spec.markdown,
-        storyBranch: `dugout/${story.key}/${spec.repo}`,
-      });
+      let outcome;
+      try {
+        // The orchestrator resolves the seed base (story HEAD if it exists, else repo default) and
+        // hands the adapter only a key + a base — the adapter owns the spec-branch name (ADR-0013).
+        const baseBranch = await (this.deps.resolveBaseBranch?.(spec.repo, story.key) ??
+          Promise.resolve("main"));
+        outcome = await this.deps.executor.execute({
+          specId: spec.id,
+          repo: spec.repo,
+          markdown: spec.markdown,
+          storyKey: story.key,
+          baseBranch,
+        });
+      } catch (err) {
+        // Operational failure (missing clone, Docker down, kiro crash) — NOT a spec grade (ADR-0011
+        // §4). Don't leave the spec `running` / story `executing` (a wedged, unhandled rejection
+        // mid-loop): unwind to a restartable `failed` state, then rethrow so the developer sees the
+        // environment cause and recovers by fixing it and re-running (ADR-0013).
+        spec.status = "failed";
+        story.status = "failed";
+        this.persistRun(story);
+        throw err;
+      }
       if (outcome.result !== "green") {
         // Mid-build ambiguity: fail the spec and the story; the dev re-clarifies and restarts
         // clean (the agent never guesses, never stacks downstream work — invariant 1).

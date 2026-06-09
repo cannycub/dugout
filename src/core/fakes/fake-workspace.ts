@@ -16,7 +16,9 @@ export class FakeWorkspace implements WorkspacePort {
   }
   async discover(roots: string[]): Promise<DiscoveredClone[]> {
     this.discoverCalls.push(roots);
-    return this.config.clones;
+    // Return a fresh snapshot per call, like the real GitWorkspace — so a consumer that caches the
+    // result holds a point-in-time view and only sees a later addClone() after it rescans.
+    return [...this.config.clones];
   }
 
   /** Simulate a clone appearing mid-flight (e.g. the developer clones a repo between scans). */

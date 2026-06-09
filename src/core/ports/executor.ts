@@ -67,13 +67,19 @@ export interface ExecuteInput {
   repo: string;
   markdown: string;
   /**
-   * The per-repo story branch this spec belongs to (`dugout/<key>/<repo>`). It is the *intended*
-   * base the sandbox seeds from — but in v1 that branch is not yet materialised (the orchestrator's
-   * `merge()` is a stub; story-branch creation + accumulation are #8), so the adapter currently seeds
-   * from the clone HEAD and uses this only to namespace the produced branch. Seeding from the
-   * story-branch HEAD is tracked in the execute-branch-model follow-up (#34).
+   * The story's key (the Jira key, e.g. `DUG-1`). The adapter composes the spec branch from it as
+   * `spec/<storyKey>/<specId>` — a sibling of the story branch `story/<storyKey>`, never nested under
+   * it (no D/F ref collision; ADR-0013). The orchestrator owns the `story/<key>` *name* where it needs
+   * it (PR head; #8's `merge()`).
    */
-  storyBranch: string;
+  storyKey: string;
+  /**
+   * The ref the sandbox seeds (forks) the spec branch from. The orchestrator resolves it to the story
+   * branch's HEAD if it exists, else the repo's default branch (ADR-0013). Today — before #8
+   * materialises the story branch — it is always the repo default; once #8 accumulates specs onto
+   * `story/<key>`, the same resolver yields the accumulated HEAD with no adapter change.
+   */
+  baseBranch: string;
 }
 
 /**

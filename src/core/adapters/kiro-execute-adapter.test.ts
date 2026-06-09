@@ -3,7 +3,7 @@ import { KiroExecuteAdapter } from "./kiro-execute-adapter.js";
 import { TEST_REPORT_TAG, AMBIGUITY_TAG } from "./execute-methodology.js";
 import type { SandcastleRun } from "./sandcastle.js";
 
-const baseInput = { specId: "s1", repo: "api", markdown: "# Spec", storyBranch: "dugout/DUG-1/api" };
+const baseInput = { specId: "s1", repo: "api", markdown: "# Spec", storyKey: "DUG-1", baseBranch: "main" };
 
 /** A fake run() returning a canned RunResult; records the options it was called with. */
 function fakeRun(result: any): { run: SandcastleRun; calls: any[] } {
@@ -20,7 +20,8 @@ const deps = (run: SandcastleRun) => ({
   sandbox: { __fake: "sandbox" } as any,
   makeAgent: () => ({ name: "kiro" }) as any,
   resolveClonePath: async (_repo: string) => "/ws/api",
-  resolveBaseBranch: async (_repo: string) => "main",
+  // The spec branch is re-forked clean every run (invariant 1); the unit fake records the call.
+  clearSpecBranch: async (_cwd: string, _branch: string) => {},
   // Inject the key so the unit tier is hermetic (runs through fakes with no secret in the env) —
   // the default `npm test`/CI must not require KIRO_API_KEY (CLAUDE.md testing pyramid).
   apiKey: "k-test",
@@ -33,20 +34,42 @@ const reportStdout = (baselineFailures: string[], afterFailures: string[]) =>
 describe("KiroExecuteAdapter", () => {
   it("returns green with the produced branch when the report shows no new failures", async () => {
     const { run, calls } = fakeRun({
-      branch: "dugout/DUG-1/api/s1",
+      branch: "spec/DUG-1/s1",
       commits: [{ sha: "abc" }],
       stdout: reportStdout(["x"], ["x"]),
     });
     const out = await new KiroExecuteAdapter(deps(run)).execute(baseInput);
-    expect(out).toEqual({ result: "green", branch: "dugout/DUG-1/api/s1" });
-    // cwd is the resolved clone; the spec branch is named + seeded from the resolved base branch
-    // (deterministic, not the clone's checked-out HEAD — #7 AC / PR review P1).
+    expect(out).toEqual({ result: "green", branch: "spec/DUG-1/s1" });
+    // cwd is the resolved clone; the spec branch is named `spec/<key>/<specId>` (a sibling of the
+    // story branch `story/<key>`, never nested under it — no D/F ref collision, ADR-0013) and seeded
+    // from the orchestrator-supplied base branch (story HEAD once #8 accumulates; else repo default).
     expect(calls[0].cwd).toBe("/ws/api");
     expect(calls[0].branchStrategy).toEqual({
       type: "branch",
-      branch: "dugout/DUG-1/api/s1",
+      branch: "spec/DUG-1/s1",
       baseBranch: "main",
     });
+  });
+
+  it("clears the spec branch before run() so a restart re-forks clean, never resumes (invariant 1)", async () => {
+    const order: string[] = [];
+    const cleared: Array<[string, string]> = [];
+    const run = (async () => {
+      order.push("run");
+      return { branch: "spec/DUG-1/s1", commits: [], stdout: reportStdout([], []) };
+    }) as unknown as SandcastleRun;
+    const d = {
+      ...deps(run),
+      clearSpecBranch: async (cwd: string, branch: string) => {
+        order.push("clear");
+        cleared.push([cwd, branch]);
+      },
+    };
+    await new KiroExecuteAdapter(d).execute(baseInput);
+    // The adapter deletes any leftover spec branch from a failed attempt before Sand Castle forks it
+    // anew from baseBranch — so a retry starts clean, never on the abandoned commits (ADR-0013).
+    expect(cleared).toEqual([["/ws/api", "spec/DUG-1/s1"]]);
+    expect(order).toEqual(["clear", "run"]);
   });
 
   it("returns red when the report shows a new failure", async () => {

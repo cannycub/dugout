@@ -8,6 +8,7 @@ import { run as sandcastleRun } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { KiroExecuteAdapter } from "./kiro-execute-adapter.js";
 import { kiroExecuteAgent } from "./kiro-agent-provider.js";
+import { GitWorkspace } from "./git-workspace.js";
 
 const sh = promisify(execFile);
 
@@ -74,13 +75,18 @@ describe("KiroExecuteAdapter (real kiro in a real Sand Castle sandbox)", () => {
       sandbox: docker({ imageName: "dugout-sandbox:local", containerUid: 1000, containerGid: 1000 }),
       makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
       resolveClonePath: async () => clone,
-      resolveBaseBranch: async () => "main",
+      // Real clean-restart: prune+delete the spec branch in the clone so Sand Castle re-forks it
+      // fresh — exactly the production wiring (orchestrator-host) uses (ADR-0013).
+      clearSpecBranch: (cwd, branch) => new GitWorkspace({ roots: [] }).deleteBranch(cwd, branch),
     });
     const out = await adapter.execute({
       specId: "s1",
       repo: "x",
       markdown: "# Add sum(a,b)\nExport `sum` from index.js returning a+b. Add a passing node:test.",
-      storyBranch: "dugout/T-1/x",
+      // The orchestrator resolves the base in production; here we drive the adapter directly, so we
+      // pass the repo's default branch (the local-only repo is on `main`). Spec branch -> spec/T-1/s1.
+      storyKey: "T-1",
+      baseBranch: "main",
     });
     expect(out.result).toBe("green");
     expect(out.result === "green" && out.branch).toContain("s1");
