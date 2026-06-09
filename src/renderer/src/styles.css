@@ -1091,3 +1091,16 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Pre-flight toggles (#19): the replay designation sits with review-required as one block. */
+.preflight-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.preflight-toggles .review-toggle {
+  margin-top: 8px;
+}
+.preflight-toggles .review-toggle + .review-toggle {
+  margin-top: 2px;
+}

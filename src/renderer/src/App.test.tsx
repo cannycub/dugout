@@ -96,15 +96,19 @@ describe("App — fake ticket through the full lifecycle, observable in the UI",
     fireEvent.click(await button(/pipeline/));
     fireEvent.click(await button(/declare 2 & draft/i));
 
-    // The developer marks the first spec review-required at pre-flight (the agent no longer
-    // designates replay specs — ADR-0008), so the run merges the first spec then stops for review
-    // before the second spec runs (ADR-0014: merge-at-green, review-required is a post-merge pause).
-    const reviewToggles = await screen.findAllByText("mark review-required");
-    fireEvent.click(reviewToggles[0]!);
+    // The developer designates the first spec a replay spec at pre-flight (#19, ADR-0008): the
+    // badge appears and review-required locks on (replay default), so the run merges the first
+    // spec then stops for review before the second stacks on it (ADR-0014).
+    const replayToggles = await screen.findAllByText("designate as replay spec");
+    fireEvent.click(replayToggles[0]!);
+    expect(screen.getByText("replay spec")).toBeTruthy();
+    expect(screen.getByText("review-required (replay default)")).toBeTruthy();
 
-    // Approve as a unit → the run call becomes available.
+    // Approve as a unit → the designation persists into the canonical contract (the badge now
+    // renders from the approved story, not the pre-flight selection), and the run call appears.
     fireEvent.click(await button(/approve spec set/i));
     const runBtn = await button(/run story/i);
+    expect(screen.getByText("replay spec")).toBeTruthy();
 
     // Run → stops at the review-required spec; the first spec is merged, the run paused.
     fireEvent.click(runBtn);
