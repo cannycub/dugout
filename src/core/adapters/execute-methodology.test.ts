@@ -24,3 +24,20 @@ describe("executeMethodology", () => {
     expect(prompt).not.toMatch(/baselineFailures|afterFailures/);
   });
 });
+
+describe("executeMethodology — non-functional directives (#12)", () => {
+  const prompt = executeMethodology({ markdown: "# Spec" });
+
+  it("carries explicit performance + concurrency directives", () => {
+    expect(prompt).toMatch(/hot path/i);
+    expect(prompt).toMatch(/allocat/i);
+    expect(prompt).toMatch(/lock|thread-safe|shared mutable state/i);
+  });
+  it("requires the agent to surface its non-functional assumptions for the reviewer", () => {
+    expect(prompt).toMatch(/non-functional assumptions/i);
+    expect(prompt).toMatch(/commit message/i);
+  });
+  it("forbids weakening the repo's existing checks", () => {
+    expect(prompt).toMatch(/never (weaken|disable|remove)/i);
+  });
+});
