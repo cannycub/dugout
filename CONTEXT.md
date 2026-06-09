@@ -62,8 +62,11 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   local clone. The developer selects them from the (searchable) catalog *before* drafting; no
   agent suggestion. Each spec in the fan-out is then assigned to exactly one declared repo.
 - **`review-required`** — a per-spec flag; when set, execution stops after the spec goes green
-  for the developer's code review before the next spec stacks on it. Default-on for replay
-  specs; the agent recommends it for performance-critical/concurrent specs.
+  **and merges into the story branch**, for the developer's code review before the next spec runs.
+  The spec is already integrated at the stop (it rests at `merged` while the story rests at
+  `awaiting-review`), so review happens on the story branch — the surface that becomes the PR — not
+  on an isolated spec branch. Default-on for replay specs; the agent recommends it for
+  performance-critical/concurrent specs.
 - **`needs-info`** — kickback state when a ticket is too thin to spec; the agent stops rather
   than guess. Also a Jira label.
 - **`needs-clarification`** — a *resumable* stop state: the agent **can** spec but is blocked on
@@ -81,9 +84,11 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   no impact-guessing.
 - **Stop** — any paused phase (a `review-required` stop, between specs, or at dev-complete)
   during which the **developer is the single writer** on the story branch and may commit
-  directly (rename, small refactor, foundational change). Contrast a *running* spec, which only
-  the harness writes — the dev never steers a running spec (invariant 1). Ownership of the line
-  alternates by phase; "harness-owned" means single-writer-while-running, never human-forbidden.
+  directly (rename, small refactor, foundational change). The write surface is **always the story
+  branch** — every green spec is merged in *before* any stop is reached, so there is never a pending
+  spec branch for the dev to steer. Contrast a *running* spec, which only the harness writes — the
+  dev never steers a running spec (invariant 1). Ownership of the line alternates by phase;
+  "harness-owned" means single-writer-while-running, never human-forbidden.
 - **Lifecycle event** — a transition the orchestrator emits as it runs, through the **lifecycle
   port**: a *story-level* status change (`drafted`, `approved`, `executing`, `awaiting-review`,
   `failed`, `dev-complete`, `pr-created`) or a *spec-level* status change (`running`, `green`,

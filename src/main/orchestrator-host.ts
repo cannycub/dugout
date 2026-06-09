@@ -197,6 +197,16 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
         ? async () => "main"
         : async (repo, storyKey) =>
             gitWorkspace.seedBranch(await repoScope.resolveClonePath(repo), `story/${storyKey}`),
+    // Land each green spec branch on the per-repo story branch locally (ADR-0014): create
+    // `story/<key>` from the repo default if absent, then `git merge --no-ff` the spec branch, so
+    // spec N+1 (seeded from the updated story HEAD above) builds on the accumulated work. Gated by
+    // the same fakes seam as `execute`/`resolveBaseBranch`: under `DUGOUT_EXECUTOR=fakes` there is no
+    // real clone on disk (e2e), so this must not touch the filesystem — it's a no-op.
+    mergeToStoryBranch:
+      process.env["DUGOUT_EXECUTOR"] === "fakes"
+        ? async () => {}
+        : async (repo, storyKey, specId) =>
+            gitWorkspace.mergeIntoStoryBranch(await repoScope.resolveClonePath(repo), storyKey, specId),
   });
   return orchestrator;
 }

@@ -42,6 +42,14 @@ export interface OrchestratorDeps {
    * fake-executor unit path, where the value is unused.
    */
   resolveBaseBranch?: (repo: string, storyKey: string) => Promise<string>;
+  /**
+   * Merge a green spec's branch into the per-repo story branch, locally (ADR-0014). The host injects
+   * the real GitWorkspace-backed merge (create `story/<key>` from the default if absent, then
+   * `git merge --no-ff spec/<key>/<specId>`); absent ⇒ a no-op for the fake-executor unit path, where
+   * there is no clone on disk. A throw is an operational error the orchestrator unwinds to a
+   * restartable `failed` state — never a spec grade (ADR-0011 §4, ADR-0014).
+   */
+  mergeToStoryBranch?: (repo: string, storyKey: string, specId: string) => Promise<void>;
 }
 
 /**
@@ -210,9 +218,10 @@ export class Orchestrator {
   }
 
   /**
-   * Resume after a `review-required` stop: the reviewed (green) spec merges into the story
-   * branch and execution continues with the next spec. Deliberate, human-directed continuation
-   * is not the banned "resume" of a failed build (invariant 1).
+   * Resume after a `review-required` stop. The reviewed spec was already merged into the story
+   * branch when it went green (ADR-0014), so resume simply continues from the next un-run spec —
+   * which seeds from the now-reviewed (and possibly dev-amended) story HEAD. Deliberate,
+   * human-directed continuation is not the banned "resume" of a failed build (invariant 1).
    */
   async resumeAfterReview(storyKey: string): Promise<Story> {
     const story = this.requireStory(storyKey);
@@ -221,15 +230,13 @@ export class Orchestrator {
         `Story ${storyKey} is ${story.status}, cannot resume (expected awaiting-review)`,
       );
     }
-    const pausedIndex = story.specs.findIndex((s) => s.status === "green");
-    const paused = story.specs[pausedIndex];
-    if (!paused) {
-      throw new Error(`Story ${storyKey} has no spec awaiting review`);
-    }
-    this.merge(story, paused);
+    // The reviewed spec is already merged; continue from the next un-run spec. If none remain (the
+    // review-required spec was the last — e.g. a single replay spec), advancing past the end lets
+    // advanceFrom's tail complete the story to dev-complete rather than wedging in awaiting-review.
+    const next = story.specs.findIndex((s) => s.status === "approved");
     story.status = "executing";
     this.persistRun(story);
-    return this.advanceFrom(story, pausedIndex + 1);
+    return this.advanceFrom(story, next === -1 ? story.specs.length : next);
   }
 
   /**
@@ -269,7 +276,9 @@ export class Orchestrator {
     const repos = [...new Set(story.specs.map((s) => s.repo))];
     const prs: PullRequest[] = [];
     for (const repo of repos) {
-      const head = `dugout/${story.key}/${repo}`;
+      // The pushed head is the per-repo story branch the green spec branches accumulated onto
+      // (`story/<key>`, ADR-0013/0014) — the branch `merge()` actually built, not the legacy name.
+      const head = `story/${story.key}`;
       await this.deps.github.push({ repo, branch: head });
       const repoSpecs = story.specs.filter((s) => s.repo === repo);
       const pr = await this.deps.github.createPullRequest({
@@ -312,10 +321,7 @@ export class Orchestrator {
         // §4). Don't leave the spec `running` / story `executing` (a wedged, unhandled rejection
         // mid-loop): unwind to a restartable `failed` state, then rethrow so the developer sees the
         // environment cause and recovers by fixing it and re-running (ADR-0013).
-        spec.status = "failed";
-        story.status = "failed";
-        this.persistRun(story);
-        throw err;
+        this.failOperational(story, spec, err);
       }
       if (outcome.result !== "green") {
         // Mid-build ambiguity: fail the spec and the story; the dev re-clarifies and restarts
@@ -326,13 +332,23 @@ export class Orchestrator {
         return story;
       }
       spec.status = "green";
+      // Merge at green, uniformly (ADR-0014): the spec lands on the story branch the instant it is
+      // green, before any stop or dev commit can move story HEAD — so the merge always fast-forwards
+      // and review-required becomes a pause AFTER the merge, not a gate on it.
+      try {
+        await this.merge(story, spec);
+      } catch (err) {
+        // A merge failure is operational (out-of-band git), not a spec grade (ADR-0014): the spec
+        // already graded green. Unwind out of the green/executing limbo to a restartable `failed`
+        // and rethrow so the developer sees the cause — same contract as an execute() throw.
+        this.failOperational(story, spec, err);
+      }
       if (spec.reviewRequired) {
-        // Stop for the developer's code review before the next spec stacks on this one.
+        // Pause for the developer's review of the now-integrated spec before the next spec runs.
         story.status = "awaiting-review";
         this.persistRun(story);
         return story;
       }
-      this.merge(story, spec);
     }
 
     story.status = "dev-complete";
@@ -340,11 +356,28 @@ export class Orchestrator {
     return story;
   }
 
-  /** Auto-merge a green spec's branch into the local story branch. */
-  private merge(story: Story, spec: Spec): void {
+  /**
+   * Auto-merge a green spec's branch into the local per-repo story branch (ADR-0014). The git
+   * mechanic is the injected dep; a throw is an operational error (out-of-band git), surfaced to the
+   * caller to unwind — never a spec grade. On success the spec rests at `merged`.
+   */
+  private async merge(story: Story, spec: Spec): Promise<void> {
+    await this.deps.mergeToStoryBranch?.(spec.repo, story.key, spec.id);
     spec.status = "merged";
     this.persistRun(story);
     this.emitMetric({ name: "spec.merged", tags: { story: story.key, repo: spec.repo } });
+  }
+
+  /**
+   * Unwind a spec+story out of the `running`/`green`/`executing` limbo to a restartable `failed`
+   * state after an operational failure (execute or merge throw — ADR-0011 §4, ADR-0014), then
+   * rethrow so the caller sees the cause. NOT a spec grade: the agent's outcome is untouched.
+   */
+  private failOperational(story: Story, spec: Spec, err: unknown): never {
+    spec.status = "failed";
+    story.status = "failed";
+    this.persistRun(story);
+    throw err;
   }
 
   /** Emit a metric best-effort: a side-effect failure degrades to a warning, never the build. */

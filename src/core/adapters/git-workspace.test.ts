@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, rm, mkdir, symlink, realpath } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, symlink, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -130,6 +130,138 @@ describe("GitWorkspace.seedBranch", () => {
       await commit(repo);
       // No story branch yet — seed from the repo default, exactly today's single-spec behaviour.
       expect(await new GitWorkspace({ roots: [] }).seedBranch(repo, "story/DUG-1")).toBe("main");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("GitWorkspace.mergeIntoStoryBranch", () => {
+  const branches = async (cwd: string) =>
+    (await run("git", ["-C", cwd, "branch", "--format=%(refname:short)"])).stdout
+      .split("\n")
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+  // Build a clone whose default branch `main` has one commit, then fork a spec branch off it with
+  // its own file commit — the shape Sand Castle leaves behind after a green run (the spec branch
+  // lives in the clone, ADR-0013).
+  const seedSpecBranch = async (repo: string, specBranch: string, file: string) => {
+    await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    // mergeIntoStoryBranch creates a real --no-ff merge commit via production code we can't pass `-c`
+    // to, so the repo needs a persistent committer identity (CI has no global git config; a dev's
+    // real clone does — relying on the ambient identity is correct for production, ADR-0014).
+    await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+    await run("git", ["-C", repo, "config", "user.name", "a"]);
+    await commit(repo);
+    await run("git", ["-C", repo, "checkout", "-q", "-b", specBranch]);
+    await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", file]);
+    await run("git", ["-C", repo, "checkout", "-q", "main"]);
+  };
+
+  it("creates the story branch from the repo default and merges the first spec --no-ff", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-"));
+    try {
+      await seedSpecBranch(repo, "spec/DUG-1/s1", "spec-1 work");
+      await new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1");
+
+      // The story branch now exists and carries the spec's commit.
+      expect(await branches(repo)).toContain("story/DUG-1");
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).toContain("spec-1 work");
+      // --no-ff: an explicit merge commit (two parents) tops the story branch (ADR-0014).
+      const head = await run("git", ["-C", repo, "rev-list", "--merges", "-1", "story/DUG-1"]);
+      expect(head.stdout.trim()).not.toBe("");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT merge onto the wrong branch when the story checkout fails (a dirty tree throws first)", async () => {
+    // Refutes the review claim that a blocked checkout lets the merge run on the wrong branch: the
+    // awaited `git checkout` rejects on non-zero exit, so mergeIntoStoryBranch throws before the
+    // merge line is ever reached. The merge never lands on the currently-checked-out branch — the
+    // throw surfaces as an operational error the orchestrator unwinds to `failed` (ADR-0014 pt 5).
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-dirty-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+      await run("git", ["-C", repo, "config", "user.name", "a"]);
+      await writeFile(join(repo, "x"), "base\n");
+      await run("git", ["-C", repo, "add", "."]);
+      await run("git", ["-C", repo, "commit", "-q", "-m", "base"]);
+      // A pre-existing story branch whose `x` diverges from main, plus a spec branch to merge.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "story/DUG-1"]);
+      await writeFile(join(repo, "x"), "story-version\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "story x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s1", "main"]);
+      await run("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "spec work"]);
+      // Land on main with an UNCOMMITTED change to `x` — checking out story/DUG-1 (where `x` differs)
+      // would clobber it, so `git checkout` refuses with a non-zero exit.
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+      const mainHeadBefore = (await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim();
+      await writeFile(join(repo, "x"), "dirty-uncommitted\n");
+
+      await expect(new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1")).rejects.toThrow();
+
+      // The merge did NOT execute on the wrong branch: we're still on main and main is unchanged.
+      expect((await run("git", ["-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim()).toBe("main");
+      expect((await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim()).toBe(mainHeadBefore);
+      expect((await run("git", ["-C", repo, "log", "--format=%s", "main"])).stdout).not.toContain("spec work");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts a conflicting merge so the repo is not left mid-merge (restartable; ADR-0014)", async () => {
+    // Conflicts can't arise in serial v1, but ADR-0014 pt 5 requires that if a merge DOES fail
+    // (out-of-band git), we `git merge --abort` before propagating — otherwise MERGE_HEAD + a
+    // conflicted index linger and the orchestrator's "restartable failed" state is a lie.
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-conflict-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+      await run("git", ["-C", repo, "config", "user.name", "a"]);
+      await writeFile(join(repo, "x"), "base\n");
+      await run("git", ["-C", repo, "add", "."]);
+      await run("git", ["-C", repo, "commit", "-q", "-m", "base"]);
+      // story and spec each change `x` divergently from base → a 3-way merge conflict.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "story/DUG-1"]);
+      await writeFile(join(repo, "x"), "story-change\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "story x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s1", "main"]);
+      await writeFile(join(repo, "x"), "spec-change\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "spec x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+
+      await expect(new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1")).rejects.toThrow();
+
+      // The merge was aborted: no MERGE_HEAD lingering, and the story branch keeps its pre-merge HEAD.
+      await expect(run("git", ["-C", repo, "rev-parse", "-q", "--verify", "MERGE_HEAD"])).rejects.toThrow();
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).not.toContain("Merge");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("accumulates a second spec onto the existing story branch (specs 1..N stack)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-acc-"));
+    try {
+      const ws = new GitWorkspace({ roots: [] });
+      await seedSpecBranch(repo, "spec/DUG-1/s1", "spec-1 work");
+      await ws.mergeIntoStoryBranch(repo, "DUG-1", "s1");
+
+      // Spec 2 forks from the accumulated story HEAD (what resolveBaseBranch yields once #8 lands),
+      // adds its own commit, and merges back — the second spec stacks on the first.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s2", "story/DUG-1"]);
+      await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "spec-2 work"]);
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+      await ws.mergeIntoStoryBranch(repo, "DUG-1", "s2");
+
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).toContain("spec-1 work");
+      expect(storyLog).toContain("spec-2 work");
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

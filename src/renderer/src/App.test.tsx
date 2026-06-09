@@ -96,10 +96,11 @@ describe("App — fake ticket through the full lifecycle, observable in the UI",
     fireEvent.click(await button(/pipeline/));
     fireEvent.click(await button(/declare 2 & draft/i));
 
-    // The developer marks the second spec review-required at pre-flight (the agent no longer
-    // designates replay specs — ADR-0008), so the run will stop after the first spec merges.
+    // The developer marks the first spec review-required at pre-flight (the agent no longer
+    // designates replay specs — ADR-0008), so the run merges the first spec then stops for review
+    // before the second spec runs (ADR-0014: merge-at-green, review-required is a post-merge pause).
     const reviewToggles = await screen.findAllByText("mark review-required");
-    fireEvent.click(reviewToggles[1]!);
+    fireEvent.click(reviewToggles[0]!);
 
     // Approve as a unit → the run call becomes available.
     fireEvent.click(await button(/approve spec set/i));
