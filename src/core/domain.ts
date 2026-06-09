@@ -70,6 +70,12 @@ export interface SpecContent {
    * unchecks — it never forces {@link reviewRequired} by itself.
    */
   reviewRecommended: boolean;
+  /**
+   * The Jira subtask representing this spec (#11), persisted in the canonical contract so it is
+   * reused on every re-entry — one subtask per spec, never duplicated (idempotency key). Absent
+   * until the write-back projection creates it (or forever, when write-back is off).
+   */
+  jiraSubtaskKey?: string;
   /** Position in the fixed execution order. */
   order: number;
 }

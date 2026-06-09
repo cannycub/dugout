@@ -103,3 +103,86 @@ describe("JiraReadAdapter.listAssignedTickets", () => {
     await expect(jira.listAssignedTickets()).rejects.toThrow(/401/);
   });
 });
+
+/** A scripted fetch for the write paths: records every call, replies per URL+method. */
+function writeFetch() {
+  const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+  const impl = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const u = String(url);
+    const method = init?.method ?? "GET";
+    calls.push({ url: u, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+    if (u.endsWith("/transitions") && method === "GET") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ transitions: [{ id: "31", name: "In Progress" }, { id: "41", name: "Done" }] }),
+      } as unknown as Response;
+    }
+    if (u.endsWith("/rest/api/3/issue") && method === "POST") {
+      return { ok: true, status: 201, json: async () => ({ key: "DUG-99" }) } as unknown as Response;
+    }
+    return { ok: true, status: 201, json: async () => ({}) } as unknown as Response;
+  }) as typeof globalThis.fetch;
+  return { calls, impl };
+}
+
+function writeAdapter(impl: typeof globalThis.fetch) {
+  return new JiraReadAdapter({
+    baseUrl: "https://acme.atlassian.net",
+    email: "dev@acme.com",
+    token: "tok",
+    fetch: impl,
+  });
+}
+
+describe("Jira write-back methods (#11) — developer's own identity, REST v3", () => {
+  it("transitions by NAME: looks up the per-project transition id, then POSTs it", async () => {
+    const { calls, impl } = writeFetch();
+    await writeAdapter(impl).transitionTicket("DUG-1", "in progress");
+
+    expect(calls[0]).toMatchObject({ method: "GET" });
+    expect(calls[1]).toMatchObject({
+      url: "https://acme.atlassian.net/rest/api/3/issue/DUG-1/transitions",
+      method: "POST",
+      body: { transition: { id: "31" } },
+    });
+  });
+
+  it("throws (for the best-effort wrapper to catch) when the named transition is unavailable", async () => {
+    const { impl } = writeFetch();
+    await expect(writeAdapter(impl).transitionTicket("DUG-1", "Ready for QA")).rejects.toThrow(
+      /Ready for QA.*In Progress, Done/s,
+    );
+  });
+
+  it("creates a subtask under the parent, deriving the project key from the issue key", async () => {
+    const { calls, impl } = writeFetch();
+    const created = await writeAdapter(impl).createSubtask("DUG-1", "DUG-1-spec-1: Add endpoint");
+
+    expect(created).toEqual({ key: "DUG-99" });
+    expect(calls[0]).toMatchObject({
+      url: "https://acme.atlassian.net/rest/api/3/issue",
+      method: "POST",
+      body: {
+        fields: {
+          project: { key: "DUG" },
+          parent: { key: "DUG-1" },
+          summary: "DUG-1-spec-1: Add endpoint",
+          issuetype: { name: "Subtask" },
+        },
+      },
+    });
+  });
+
+  it("closes a subtask: ADF completion comment first, then the Done transition", async () => {
+    const { calls, impl } = writeFetch();
+    await writeAdapter(impl).closeSubtask("DUG-99", "merged at green");
+
+    expect(calls[0]).toMatchObject({
+      url: "https://acme.atlassian.net/rest/api/3/issue/DUG-99/comment",
+      method: "POST",
+    });
+    expect(JSON.stringify(calls[0]!.body)).toContain("merged at green");
+    expect(calls[2]).toMatchObject({ method: "POST", body: { transition: { id: "41" } } });
+  });
+});
