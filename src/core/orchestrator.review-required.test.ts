@@ -45,4 +45,19 @@ describe("review-required stop", () => {
     // spec-1 was merged at the stop (not again on resume); resume only merges spec-2.
     expect(mergeCalls.map((c) => c.specId)).toEqual(["DUG-1-spec-1", "DUG-1-spec-2"]);
   });
+
+  it("resumes to dev-complete when the review-required spec is the LAST (nothing left to run)", async () => {
+    // A single review-required spec (e.g. a replay spec, which defaults review-required) merges at
+    // green and stops. On resume there is no further spec to run — the story must complete, not get
+    // stuck in awaiting-review (regression: Model B left no `green` spec for the old resume to find).
+    const harness = makeHarness({ draft: [{ repo: "web", markdown: "# Spec A" }] });
+    await harness.orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
+    await harness.orchestrator.approveStory("DUG-1", { reviewRequired: ["DUG-1-spec-1"] });
+    await harness.orchestrator.runStory("DUG-1");
+
+    const story = await harness.orchestrator.resumeAfterReview("DUG-1");
+
+    expect(story.status).toBe("dev-complete");
+    expect(story.specs.map((s) => s.status)).toEqual(["merged"]);
+  });
 });

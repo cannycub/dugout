@@ -230,13 +230,13 @@ export class Orchestrator {
         `Story ${storyKey} is ${story.status}, cannot resume (expected awaiting-review)`,
       );
     }
-    const nextIndex = story.specs.findIndex((s) => s.status === "approved");
-    if (nextIndex === -1) {
-      throw new Error(`Story ${storyKey} has no spec awaiting review`);
-    }
+    // The reviewed spec is already merged; continue from the next un-run spec. If none remain (the
+    // review-required spec was the last — e.g. a single replay spec), advancing past the end lets
+    // advanceFrom's tail complete the story to dev-complete rather than wedging in awaiting-review.
+    const next = story.specs.findIndex((s) => s.status === "approved");
     story.status = "executing";
     this.persistRun(story);
-    return this.advanceFrom(story, nextIndex);
+    return this.advanceFrom(story, next === -1 ? story.specs.length : next);
   }
 
   /**

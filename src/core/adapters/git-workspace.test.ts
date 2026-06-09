@@ -213,6 +213,38 @@ describe("GitWorkspace.mergeIntoStoryBranch", () => {
     }
   });
 
+  it("aborts a conflicting merge so the repo is not left mid-merge (restartable; ADR-0014)", async () => {
+    // Conflicts can't arise in serial v1, but ADR-0014 pt 5 requires that if a merge DOES fail
+    // (out-of-band git), we `git merge --abort` before propagating — otherwise MERGE_HEAD + a
+    // conflicted index linger and the orchestrator's "restartable failed" state is a lie.
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-conflict-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+      await run("git", ["-C", repo, "config", "user.name", "a"]);
+      await writeFile(join(repo, "x"), "base\n");
+      await run("git", ["-C", repo, "add", "."]);
+      await run("git", ["-C", repo, "commit", "-q", "-m", "base"]);
+      // story and spec each change `x` divergently from base → a 3-way merge conflict.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "story/DUG-1"]);
+      await writeFile(join(repo, "x"), "story-change\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "story x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s1", "main"]);
+      await writeFile(join(repo, "x"), "spec-change\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "spec x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+
+      await expect(new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1")).rejects.toThrow();
+
+      // The merge was aborted: no MERGE_HEAD lingering, and the story branch keeps its pre-merge HEAD.
+      await expect(run("git", ["-C", repo, "rev-parse", "-q", "--verify", "MERGE_HEAD"])).rejects.toThrow();
+      const storyLog = (await run("git", ["-C", repo, "log", "--format=%s", "story/DUG-1"])).stdout;
+      expect(storyLog).not.toContain("Merge");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it("accumulates a second spec onto the existing story branch (specs 1..N stack)", async () => {
     const repo = await mkdtemp(join(tmpdir(), "dugout-merge-acc-"));
     try {

@@ -108,7 +108,16 @@ export class GitWorkspace implements WorkspacePort {
       await run("git", ["-C", path, "branch", story, await this.defaultBranch(path)]);
     }
     await run("git", ["-C", path, "checkout", "-q", story]);
-    await run("git", ["-C", path, "merge", "--no-ff", "--no-edit", "-m", `Merge ${spec}`, spec]);
+    try {
+      await run("git", ["-C", path, "merge", "--no-ff", "--no-edit", "-m", `Merge ${spec}`, spec]);
+    } catch (err) {
+      // A failed merge (conflict / out-of-band git) must not leave the repo mid-merge: abort so the
+      // index and worktree return to the pre-merge story HEAD, keeping the orchestrator's
+      // unwind-to-`failed` genuinely restartable (ADR-0014 pt 5). Best-effort — if there is nothing
+      // to abort (e.g. the merge never started), swallow that and surface the original error.
+      await run("git", ["-C", path, "merge", "--abort"]).catch(() => {});
+      throw err;
+    }
   }
 
   async discover(roots: string[]): Promise<DiscoveredClone[]> {
