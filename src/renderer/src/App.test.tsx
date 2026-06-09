@@ -433,3 +433,37 @@ describe("App — live lifecycle stream patches the held story (#27)", () => {
     expect(screen.getAllByText("Merged")).toHaveLength(2);
   });
 });
+
+describe("App — agent review recommendation at pre-flight (#6)", () => {
+  it("pre-checks the recommended spec's toggle with the marker; unchecking overrules the agent", async () => {
+    const executor: ExecutorPort = {
+      draft: async () => ({
+        result: "drafted",
+        specs: [
+          { repo: "widget-api", markdown: "# Hot ingest path", reviewRecommended: true },
+          { repo: "widget-api", markdown: "# Plain CRUD" },
+        ],
+      }),
+      execute: async ({ specId }) => ({ result: "green", branch: `spec/x/${specId}` }),
+    };
+    renderApp({ executor });
+
+    fireEvent.click(await button(/Stream widget events/));
+    fireEvent.click(await button(/widget-api/));
+    fireEvent.click(await button(/declare 1 & draft/i));
+
+    // The recommendation arrives pre-checked and marked; the second spec is untouched.
+    expect(await screen.findByText(/agent suggests review/)).toBeTruthy();
+    const toggles = screen.getAllByRole("checkbox");
+    // Per card: [replay, review]. Card 1's review toggle is index 1, card 2's is index 3.
+    expect((toggles[1] as HTMLInputElement).checked).toBe(true);
+    expect((toggles[3] as HTMLInputElement).checked).toBe(false);
+
+    // The developer overrules: uncheck and approve — no review-required badge survives approval,
+    // and the run flows to dev-complete without a review stop.
+    fireEvent.click(toggles[1]!);
+    fireEvent.click(await button(/approve spec set/i));
+    fireEvent.click(await button(/run story/i));
+    await button(/push & open prs/i); // no "resume after review" stop on the way
+  });
+});

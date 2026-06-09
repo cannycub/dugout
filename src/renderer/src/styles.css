@@ -1104,3 +1104,13 @@ body {
 .preflight-toggles .review-toggle + .review-toggle {
   margin-top: 2px;
 }
+
+/* The agent's review recommendation marker (#6): informational, the developer's toggle decides. */
+.review-suggested {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--amber);
+  opacity: 0.75;
+  margin-left: 6px;
+}

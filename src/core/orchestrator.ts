@@ -163,6 +163,7 @@ export class Orchestrator {
           status: "drafted",
           isReplaySpec: false, // the developer designates replay specs at the gate (ADR-0008)
           reviewRequired: false, // finalized at pre-flight (approveStory)
+          reviewRecommended: drafted.reviewRecommended ?? false, // agent's call-out; dev confirms (#6)
           order,
         }));
 
@@ -446,6 +447,7 @@ export class Orchestrator {
       markdown: s.markdown,
       isReplaySpec: s.isReplaySpec,
       reviewRequired: s.reviewRequired,
+      reviewRecommended: s.reviewRecommended,
       order: s.order,
     }));
     const content: StorySpecs = { key: story.key, title: story.title, specs };

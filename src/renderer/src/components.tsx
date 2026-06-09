@@ -218,6 +218,9 @@ function SpecCard({ spec, index, editable, reviewSelected, replaySelected, onTog
                 onChange={onToggleReview}
               />
               {replaySelected ? "review-required (replay default)" : "mark review-required"}
+              {!replaySelected && spec.reviewRecommended && (
+                <span className="review-suggested">agent suggests review — perf/concurrency</span>
+              )}
             </label>
           </div>
         )}
