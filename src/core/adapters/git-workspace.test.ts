@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, rm, mkdir, symlink, realpath } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, symlink, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -148,6 +148,11 @@ describe("GitWorkspace.mergeIntoStoryBranch", () => {
   // lives in the clone, ADR-0013).
   const seedSpecBranch = async (repo: string, specBranch: string, file: string) => {
     await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    // mergeIntoStoryBranch creates a real --no-ff merge commit via production code we can't pass `-c`
+    // to, so the repo needs a persistent committer identity (CI has no global git config; a dev's
+    // real clone does — relying on the ambient identity is correct for production, ADR-0014).
+    await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+    await run("git", ["-C", repo, "config", "user.name", "a"]);
     await commit(repo);
     await run("git", ["-C", repo, "checkout", "-q", "-b", specBranch]);
     await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", file]);
@@ -167,6 +172,42 @@ describe("GitWorkspace.mergeIntoStoryBranch", () => {
       // --no-ff: an explicit merge commit (two parents) tops the story branch (ADR-0014).
       const head = await run("git", ["-C", repo, "rev-list", "--merges", "-1", "story/DUG-1"]);
       expect(head.stdout.trim()).not.toBe("");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT merge onto the wrong branch when the story checkout fails (a dirty tree throws first)", async () => {
+    // Refutes the review claim that a blocked checkout lets the merge run on the wrong branch: the
+    // awaited `git checkout` rejects on non-zero exit, so mergeIntoStoryBranch throws before the
+    // merge line is ever reached. The merge never lands on the currently-checked-out branch — the
+    // throw surfaces as an operational error the orchestrator unwinds to `failed` (ADR-0014 pt 5).
+    const repo = await mkdtemp(join(tmpdir(), "dugout-merge-dirty-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+      await run("git", ["-C", repo, "config", "user.name", "a"]);
+      await writeFile(join(repo, "x"), "base\n");
+      await run("git", ["-C", repo, "add", "."]);
+      await run("git", ["-C", repo, "commit", "-q", "-m", "base"]);
+      // A pre-existing story branch whose `x` diverges from main, plus a spec branch to merge.
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "story/DUG-1"]);
+      await writeFile(join(repo, "x"), "story-version\n");
+      await run("git", ["-C", repo, "commit", "-aqm", "story x"]);
+      await run("git", ["-C", repo, "checkout", "-q", "-b", "spec/DUG-1/s1", "main"]);
+      await run("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "spec work"]);
+      // Land on main with an UNCOMMITTED change to `x` — checking out story/DUG-1 (where `x` differs)
+      // would clobber it, so `git checkout` refuses with a non-zero exit.
+      await run("git", ["-C", repo, "checkout", "-q", "main"]);
+      const mainHeadBefore = (await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim();
+      await writeFile(join(repo, "x"), "dirty-uncommitted\n");
+
+      await expect(new GitWorkspace({ roots: [] }).mergeIntoStoryBranch(repo, "DUG-1", "s1")).rejects.toThrow();
+
+      // The merge did NOT execute on the wrong branch: we're still on main and main is unchanged.
+      expect((await run("git", ["-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim()).toBe("main");
+      expect((await run("git", ["-C", repo, "rev-parse", "main"])).stdout.trim()).toBe(mainHeadBefore);
+      expect((await run("git", ["-C", repo, "log", "--format=%s", "main"])).stdout).not.toContain("spec work");
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

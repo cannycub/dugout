@@ -36,6 +36,10 @@ describe("story-branch accumulation (multi-spec, AC5)", () => {
     try {
       const ws = new GitWorkspace({ roots: [] });
       await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      // mergeIntoStoryBranch creates a real --no-ff merge commit via production code, so the repo
+      // needs a persistent committer identity (CI has no global git config). See git-workspace.test.
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"]);
+      await run("git", ["-C", repo, "config", "user.name", "a"]);
       await writeFile(join(repo, "README"), "base\n");
       await run("git", ["-C", repo, "add", "."]);
       await run("git", ["-C", repo, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "-m", "base"]);
