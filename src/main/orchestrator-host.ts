@@ -21,6 +21,7 @@ import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "../core/adapters/k
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
+import { notifyNative } from "./notifications.js";
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
@@ -47,10 +48,15 @@ class NoopMetrics implements MetricsPort {
   }
 }
 
-/** Lifecycle port → renderer: stamp the wire time and broadcast to every window (#27). */
+/**
+ * Lifecycle port → renderer + OS: stamp the wire time and broadcast to every window (#27), and
+ * surface the pass/fail/review-stop transitions as native notifications so the developer can walk
+ * away during a run (#14). Both sinks are best-effort.
+ */
 const lifecycleBroadcaster: LifecyclePort = {
   emit(event: LifecycleEvent): void {
     broadcast({ ...event, at: Date.now() });
+    notifyNative(event);
   },
 };
 
