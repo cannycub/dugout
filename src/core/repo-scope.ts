@@ -56,6 +56,29 @@ export class RepoScope {
     });
   }
 
+  /**
+   * Resolve a declared repo to its local clone path for execute mode (Sand Castle cwd). Unlike
+   * `declare` (which serves the UI/draft fast path and legitimately returns "not-cloned"), this is the
+   * execute seam: a clone is *required*. The cached index can be stale — a clone deleted, moved, or
+   * freshly created since the last scan — so on a miss this **rescans once** before giving up, then
+   * fails loudly. A genuinely-missing clone is an operational error, not a spec outcome (ADR-0011 §4,
+   * ADR-0013); the developer fixes the environment (re-clone) and re-runs.
+   */
+  async resolveClonePath(name: string): Promise<string> {
+    const bound = (await this.declare([name]))[0]!.clone;
+    if (bound.status === "cloned") return bound.path;
+    if (bound.status === "ambiguous") {
+      throw new Error(
+        `repo "${name}" matches multiple local clones; disambiguate before execute: ${bound.candidates.join(", ")}`,
+      );
+    }
+    // not-cloned: the cache may be stale — rescan once and re-check before failing.
+    await this.rescan();
+    const rebound = (await this.declare([name]))[0]!.clone;
+    if (rebound.status === "cloned") return rebound.path;
+    throw new Error(`execute mode needs a local clone of "${name}" (not cloned).`);
+  }
+
   /** Re-scan workspace roots and refresh the catalog+clone index (drops the cache). */
   async rescan(): Promise<void> {
     this.cache = undefined;

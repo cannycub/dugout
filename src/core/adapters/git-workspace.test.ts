@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -37,6 +37,27 @@ describe("GitWorkspace.discover", () => {
     expect(await new GitWorkspace({ roots: [root] }).listRoots()).toEqual([root]);
   });
 
+  it("returns canonical (realpath) clone paths, not paths reached through a symlinked root", async () => {
+    // Sand Castle bind-mounts the worktree at the path we hand it; a non-canonical path (e.g. macOS
+    // /var -> /private/var, or any symlinked workspace root) leaves the in-container gitdir unmounted.
+    // The discovered path must be canonical so the product seam matches what the agent test does by hand.
+    const real = await mkdtemp(join(tmpdir(), "dugout-real-"));
+    const linkParent = await mkdtemp(join(tmpdir(), "dugout-link-"));
+    const link = join(linkParent, "via-symlink");
+    try {
+      const clone = join(real, "widget-api");
+      await mkdir(clone);
+      await run("git", ["init", "-q"], { cwd: clone });
+      await symlink(real, link); // link -> real
+      const clones = await new GitWorkspace({ roots: [link] }).discover([link]);
+      const widget = clones.find((c) => c.path.endsWith("widget-api"));
+      expect(widget?.path).toBe(await realpath(clone));
+    } finally {
+      await rm(real, { recursive: true, force: true });
+      await rm(linkParent, { recursive: true, force: true });
+    }
+  });
+
   it("does not mis-detect plain subdirs as clones when the root is itself inside a git repo", async () => {
     // If the workspace root lives inside a repo (e.g. ~/work under a dotfiles repo), git ascends
     // the tree, so a naive is-inside-work-tree check would bind every plain subdir to the
@@ -56,6 +77,64 @@ describe("GitWorkspace.discover", () => {
 
 const commit = (cwd: string) =>
   run("git", ["-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x"], { cwd });
+
+describe("GitWorkspace.deleteBranch", () => {
+  const branches = async (cwd: string) =>
+    (await run("git", ["-C", cwd, "branch", "--format=%(refname:short)"])).stdout.split("\n").map((b) => b.trim()).filter(Boolean);
+
+  it("deletes the spec branch so the next run re-forks it clean (clean restart, invariant 1)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-del-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await commit(repo);
+      await run("git", ["-C", repo, "branch", "spec/DUG-1/s1"]);
+      expect(await branches(repo)).toContain("spec/DUG-1/s1");
+      await new GitWorkspace({ roots: [] }).deleteBranch(repo, "spec/DUG-1/s1");
+      expect(await branches(repo)).not.toContain("spec/DUG-1/s1");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when the branch does not exist (a fresh first run, never a restart)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-del-noop-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await commit(repo);
+      await expect(
+        new GitWorkspace({ roots: [] }).deleteBranch(repo, "spec/DUG-1/never"),
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("GitWorkspace.seedBranch", () => {
+  it("returns the preferred branch when it exists (the accumulated story branch — #8)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-seed-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await commit(repo);
+      await run("git", ["-C", repo, "branch", "story/DUG-1"]);
+      expect(await new GitWorkspace({ roots: [] }).seedBranch(repo, "story/DUG-1")).toBe("story/DUG-1");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the default branch when the preferred branch does not exist (first spec)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "dugout-seed-fallback-"));
+    try {
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await commit(repo);
+      // No story branch yet — seed from the repo default, exactly today's single-spec behaviour.
+      expect(await new GitWorkspace({ roots: [] }).seedBranch(repo, "story/DUG-1")).toBe("main");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("GitWorkspace.defaultBranch", () => {
   it("returns the current branch for a local-only repo with no origin", async () => {

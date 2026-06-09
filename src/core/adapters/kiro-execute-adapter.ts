@@ -18,11 +18,12 @@ export interface KiroExecuteDeps {
   /** Resolve a declared repo name to its local clone path (Sandcastle cwd). */
   resolveClonePath: (repo: string) => Promise<string>;
   /**
-   * Resolve the deterministic base branch the sandbox seeds from (#7 AC: "seeded from a base
-   * branch", not the clone's accidentally-checked-out HEAD). v1 = the repo's default branch; seeding
-   * from the updated story-branch HEAD (accumulation) is the #8/#34 follow-up.
+   * Remove the spec branch from the clone if it exists (pruning any pinned worktree first), so Sand
+   * Castle re-forks it clean from `baseBranch`. Called before every run: Sand Castle ignores
+   * `baseBranch` when the branch already exists, which would resume a failed attempt's commits rather
+   * than restart clean (invariant 1; ADR-0013).
    */
-  resolveBaseBranch: (repo: string) => Promise<string>;
+  clearSpecBranch: (cwd: string, branch: string) => Promise<void>;
   /** kiro api key source; defaults to process.env.KIRO_API_KEY. */
   apiKey?: string;
 }
@@ -84,18 +85,26 @@ export class KiroExecuteAdapter {
       throw new Error("execute mode needs KIRO_API_KEY (kiro.dev/docs/cli/headless).");
     }
     const cwd = await this.deps.resolveClonePath(input.repo);
-    const baseBranch = await this.deps.resolveBaseBranch(input.repo);
-    const specBranch = `${input.storyBranch}/${input.specId}`;
+    // Spec branch is a sibling of the story branch (`spec/<key>/<specId>` vs `story/<key>`), never
+    // nested under it — git stores refs as files, so a nested name would D/F-collide with the story
+    // branch ref once #8 materialises it (ADR-0013).
+    const specBranch = `spec/${input.storyKey}/${input.specId}`;
+
+    // Re-fork the spec branch clean every run: delete any leftover from a failed attempt so Sand
+    // Castle creates it anew from baseBranch (it ignores baseBranch when the branch exists). A retry
+    // therefore restarts, never resumes (invariant 1; ADR-0013).
+    await this.deps.clearSpecBranch(cwd, specBranch);
 
     // run() throwing is an operational failure (sandbox/docker/kiro infra) — let it propagate.
-    // baseBranch makes the seed deterministic (the repo's default branch), not the clone's
-    // accidentally-checked-out HEAD (#7 AC; PR review P1).
+    // The orchestrator resolves `baseBranch` (story HEAD if it exists, else the repo default), so the
+    // seed is deterministic and accumulates onto the story branch once #8 lands — without changing
+    // this adapter (ADR-0013).
     const result = await this.deps.run({
       agent: this.deps.makeAgent(apiKey),
       sandbox: this.deps.sandbox,
       cwd,
       prompt: executeMethodology({ markdown: input.markdown }),
-      branchStrategy: { type: "branch", branch: specBranch, baseBranch },
+      branchStrategy: { type: "branch", branch: specBranch, baseBranch: input.baseBranch },
     } as never);
 
     // kiro emits ANSI even with NO_COLOR when piped (#8352, as the draft runner documents), which

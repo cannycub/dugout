@@ -47,6 +47,12 @@ for turning Jira tickets into fully-linked PRs. **Assistive, never autonomous:**
   restart**, never a resume (invariant 1).
 - **Story branch** — the per-repo branch onto which green spec branches accumulate locally.
   Stays local until a single end-of-story push.
+- **Spec branch** — the branch a single execute-mode run produces for one spec: forked from the
+  story-branch HEAD (the repo's default branch for the first spec, before anything has
+  accumulated), built red→green inside the sandbox, and merged into the story branch on green.
+  Transient and **re-forked clean on every run** — a restart discards the failed attempt's branch
+  rather than resuming it (invariant 1). Lives in a separate ref namespace from the story branch so
+  the two never collide.
 - **Catalog** — the team-wide list of known repo identities (name + canonical remote). The
   source of repo *suggestions*; team-owned, not machine-specific, and never derived from disk
   layout.

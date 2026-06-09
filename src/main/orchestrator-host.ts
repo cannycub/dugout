@@ -23,7 +23,7 @@ import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { JiraPort } from "../core/ports/jira.js";
-import type { DraftOutcome, ExecutorPort } from "../core/ports/executor.js";
+import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
 
@@ -80,6 +80,24 @@ function fakeDraftSeed(): DraftOutcome | DraftOutcome[] {
 }
 
 /**
+ * Wrap the fake executor's execute so the e2e can drive the failed → restart-clean recovery path
+ * through real Electron IPC. With `DUGOUT_SEED_FAIL` set, the FIRST execute returns `red` (the story
+ * fails); the clean restart re-runs every spec to green. Sibling of the `DUGOUT_SEED_CLARIFY` seam —
+ * dev/test only, no effect on the shipped app (env unset).
+ */
+function fakeExecuteSeam(fake: FakeExecutor): (input: ExecuteInput) => Promise<ExecuteOutcome> {
+  if (!process.env["DUGOUT_SEED_FAIL"]) return (input) => fake.execute(input);
+  let failedOnce = false;
+  return (input) => {
+    if (!failedOnce) {
+      failedOnce = true;
+      return Promise.resolve({ result: "red", reason: "seed: simulated red on first attempt (DUGOUT_SEED_FAIL)" });
+    }
+    return fake.execute(input);
+  };
+}
+
+/**
  * Wires the orchestrator. The shipped app is **always live**: drafting runs the real (kiro)
  * adapter. Setting `DUGOUT_EXECUTOR=fakes` selects the in-memory fakes instead — a dev/test wiring
  * seam fixed at startup (ADR-0010), consistent with the `DUGOUT_SEED_CLARIFY` / `DUGOUT_JIRA_*`
@@ -103,17 +121,6 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
 
   const gitWorkspace = new GitWorkspace({ roots: workspaceRoots() });
   const repoScope = new RepoScope(new GitHubCatalog(github), gitWorkspace);
-
-  // Resolve a declared repo name to its local clone path, failing loudly if it isn't cloned. Shared
-  // by the execute adapter's `resolveClonePath` (the sandbox cwd) and `resolveBaseBranch` (the
-  // deterministic seed branch) so both go through one declare() rather than each declaring twice.
-  const clonePathFor = async (repo: string): Promise<string> => {
-    const [declared] = await repoScope.declare([repo]);
-    if (!declared || declared.clone.status !== "cloned") {
-      throw new Error(`execute mode needs a local clone of "${repo}" (not cloned).`);
-    }
-    return declared.clone.path;
-  };
 
   // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
   // main process — both kiro adapters take it explicitly rather than reading process.env lazily, so a
@@ -154,15 +161,19 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
       containerGid: 1000,
     }),
     makeAgent: (apiKey) => kiroExecuteAgent({ apiKey }),
-    resolveClonePath: clonePathFor,
-    resolveBaseBranch: async (repo) => gitWorkspace.defaultBranch(await clonePathFor(repo)),
+    // The clone path (Sand Castle cwd), rescanning once if the cache is stale (ADR-0013). A
+    // genuinely-missing clone throws — an operational error the orchestrator unwinds cleanly.
+    resolveClonePath: (repo) => repoScope.resolveClonePath(repo),
+    // Re-fork the spec branch clean each run so a restart never resumes a failed attempt (invariant 1).
+    clearSpecBranch: (cwd, branch) => gitWorkspace.deleteBranch(cwd, branch),
     ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
   });
+  const fakeExecute = fakeExecuteSeam(fake);
   const executor: ExecutorPort = {
     draft: (input) => draftExecutor.draft(input),
     execute:
       process.env["DUGOUT_EXECUTOR"] === "fakes"
-        ? (input) => fake.execute(input)
+        ? fakeExecute
         : (input) => kiroExecute.execute(input),
   };
 
@@ -175,6 +186,17 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     specStore: new InMemorySpecStore(),
     store: openRunStateStore(userDataDir),
     repoScope,
+    // Seed each spec from the per-repo story branch's HEAD if it exists, else the repo default
+    // (ADR-0013). Today the story branch is never materialised, so this is always the default — once
+    // #8 creates and accumulates `story/<key>`, the same resolver seeds spec N from the accumulated
+    // HEAD with no further change here. Gated by the same fakes seam as `execute`: under
+    // `DUGOUT_EXECUTOR=fakes` there is no real clone on disk (e2e), so base resolution must NOT touch
+    // the filesystem — it returns a placeholder the fake executor ignores.
+    resolveBaseBranch:
+      process.env["DUGOUT_EXECUTOR"] === "fakes"
+        ? async () => "main"
+        : async (repo, storyKey) =>
+            gitWorkspace.seedBranch(await repoScope.resolveClonePath(repo), `story/${storyKey}`),
   });
   return orchestrator;
 }
