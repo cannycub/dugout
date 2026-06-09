@@ -388,3 +388,44 @@ describe("App — clarification loop robustness (review fixes #1–#3)", () => {
     expect(field.value).toBe("Soft-delete only.");
   });
 });
+
+describe("App — live lifecycle stream patches the held story (#27)", () => {
+  it("moves the running spec's chip while run() is still in flight, by specId", async () => {
+    // Gate the first spec's execute so the run is observably in flight: the UI must show spec-1
+    // "On the field" (running) from the streamed `spec` event alone — run() has not returned yet.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const executor: ExecutorPort = {
+      draft: async () => ({
+        result: "drafted",
+        specs: [
+          { repo: "widget-api", markdown: "# A" },
+          { repo: "widget-api", markdown: "# B" },
+        ],
+      }),
+      execute: async ({ specId }) => {
+        if (specId.endsWith("spec-1")) await gate;
+        return { result: "green", branch: `spec/x/${specId}` };
+      },
+    };
+    renderApp({ executor });
+
+    fireEvent.click(await button(/Stream widget events/));
+    fireEvent.click(await button(/widget-api/));
+    fireEvent.click(await button(/declare 1 & draft/i));
+    fireEvent.click(await button(/approve spec set/i));
+    fireEvent.click(await button(/run story/i));
+
+    // Mid-flight: exactly the first spec is on the field; the second still rests at Approved.
+    // (Read the spec-card chips, not page-wide text — the ribbon also says "Approved".)
+    await screen.findAllByText("On the field");
+    const chipTexts = () =>
+      [...document.querySelectorAll(".spec-card .spec-chip")].map((c) => c.textContent?.trim());
+    expect(chipTexts()).toEqual(["On the field", "Approved"]);
+
+    // Release the gate — the run completes and the final story (run()'s return) takes over.
+    release();
+    await button(/push & open prs/i);
+    expect(screen.getAllByText("Merged")).toHaveLength(2);
+  });
+});

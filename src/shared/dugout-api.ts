@@ -4,17 +4,21 @@
  * it can be implemented over HTTP against a backend, with no change to the React components.
  */
 
-import type { Story, Preflight } from "../core/domain.js";
+import type { Story, Preflight, StoryStatus, SpecStatus } from "../core/domain.js";
 import type { DraftStoryResult } from "../core/orchestrator.js";
 import type { Ticket } from "../core/ports/jira.js";
 import type { PullRequest } from "../core/ports/github.js";
 import type { ClarificationRound } from "../core/ports/executor.js";
 import type { DeclaredRepo, RepoMatch } from "../core/repo-scope.js";
 
-/** A streamed telemetry event (metric emit or lifecycle transition) shown in the UI log. */
+/**
+ * A streamed lifecycle transition (#27): the wire shape of the core's LifecycleEvent, stamped with
+ * `at` by the transport. Typed per kind so the renderer can patch a held Story by specId. Metrics
+ * are deliberately NOT on this stream — they go port → Datadog/no-op and never reach the renderer.
+ */
 export type DugoutEvent =
-  | { kind: "metric"; name: string; tags: Record<string, string | number>; at: number }
-  | { kind: "lifecycle"; name: string; storyKey: string; status: string; at: number };
+  | { kind: "story"; storyKey: string; status: StoryStatus; at: number }
+  | { kind: "spec"; storyKey: string; specId: string; status: SpecStatus; at: number };
 
 /** Stable IPC channel names, shared by preload and main so they can't drift. */
 export const CHANNELS = {

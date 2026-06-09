@@ -3,6 +3,7 @@ import { FakeJira } from "./fakes/fake-jira.js";
 import { FakeExecutor } from "./fakes/fake-executor.js";
 import { FakeGitHub } from "./fakes/fake-github.js";
 import { FakeMetrics } from "./fakes/fake-metrics.js";
+import { FakeLifecycle } from "./fakes/fake-lifecycle.js";
 import { FakeEnvReplay } from "./fakes/fake-env-replay.js";
 import { InMemoryRunStateStore } from "./store/in-memory-run-state-store.js";
 import { InMemorySpecStore } from "./store/in-memory-spec-store.js";
@@ -79,8 +80,9 @@ export function makeHarness(options: HarnessOptions) {
     (async (repo: string, storyKey: string, specId: string) => {
       mergeCalls.push({ repo, storyKey, specId });
     });
-  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, store, specStore, resolveBaseBranch, mergeToStoryBranch });
-  return { orchestrator, jira, executor, github, metrics, envReplay, store, specStore, mergeCalls };
+  const lifecycle = new FakeLifecycle();
+  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, lifecycle, store, specStore, resolveBaseBranch, mergeToStoryBranch });
+  return { orchestrator, jira, executor, github, metrics, envReplay, lifecycle, store, specStore, mergeCalls };
 }
 
 /**

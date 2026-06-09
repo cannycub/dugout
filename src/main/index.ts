@@ -6,7 +6,7 @@ import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
 import type { DeclaredRepo } from "../core/repo-scope.js";
 import type { ClarificationRound } from "../core/ports/executor.js";
-import { createOrchestrator, broadcast } from "./orchestrator-host.js";
+import { createOrchestrator } from "./orchestrator-host.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,11 +39,9 @@ function createWindow(): void {
   }
 }
 
-/** Register the IPC handlers that back the DugoutApi, broadcasting lifecycle transitions. */
+/** Register the IPC handlers that back the DugoutApi. Lifecycle transitions stream from the
+ * core's LifecyclePort (wired in orchestrator-host, #27) — no per-handler re-derivation here. */
 function registerIpc(orchestrator: Orchestrator): void {
-  const afterTransition = (storyKey: string, status: string) =>
-    broadcast({ kind: "lifecycle", name: `story.${status}`, storyKey, status, at: Date.now() });
-
   ipcMain.handle(CHANNELS.listTickets, () => orchestrator.listAssignedTickets());
 
   ipcMain.handle(CHANNELS.getStory, (_e, key: string) => orchestrator.getStory(key) ?? null);
@@ -51,13 +49,10 @@ function registerIpc(orchestrator: Orchestrator): void {
   ipcMain.handle(
     CHANNELS.draft,
     async (_e, key: string, repos: DeclaredRepo[], clarifications?: ClarificationRound[]) => {
-      const result = await orchestrator.draftStory(key, {
+      return orchestrator.draftStory(key, {
         repos,
         ...(clarifications ? { clarifications } : {}),
       });
-      // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
-      if (result.outcome === "drafted") afterTransition(key, result.story.status);
-      return result;
     },
   );
 
@@ -66,35 +61,19 @@ function registerIpc(orchestrator: Orchestrator): void {
   ipcMain.handle(CHANNELS.rescanRepos, () => orchestrator.rescanRepos());
   ipcMain.handle(CHANNELS.listWorkspaceRoots, () => orchestrator.listWorkspaceRoots());
 
-  ipcMain.handle(CHANNELS.approve, async (_e, key: string, preflight: Preflight) => {
-    const story = await orchestrator.approveStory(key, preflight);
-    afterTransition(key, story.status);
-    return story;
-  });
+  ipcMain.handle(CHANNELS.approve, (_e, key: string, preflight: Preflight) =>
+    orchestrator.approveStory(key, preflight),
+  );
 
-  ipcMain.handle(CHANNELS.run, async (_e, key: string) => {
-    const story = await orchestrator.runStory(key);
-    afterTransition(key, story.status);
-    return story;
-  });
+  ipcMain.handle(CHANNELS.run, (_e, key: string) => orchestrator.runStory(key));
 
-  ipcMain.handle(CHANNELS.resume, async (_e, key: string) => {
-    const story = await orchestrator.resumeAfterReview(key);
-    afterTransition(key, story.status);
-    return story;
-  });
+  ipcMain.handle(CHANNELS.resume, (_e, key: string) => orchestrator.resumeAfterReview(key));
 
-  ipcMain.handle(CHANNELS.restart, async (_e, key: string) => {
-    const story = await orchestrator.restartStory(key);
-    afterTransition(key, story.status);
-    return story;
-  });
+  ipcMain.handle(CHANNELS.restart, (_e, key: string) => orchestrator.restartStory(key));
 
-  ipcMain.handle(CHANNELS.createPullRequests, async (_e, key: string) => {
-    const prs = await orchestrator.createPullRequests(key);
-    afterTransition(key, "pr-created");
-    return prs;
-  });
+  ipcMain.handle(CHANNELS.createPullRequests, (_e, key: string) =>
+    orchestrator.createPullRequests(key),
+  );
 }
 
 app.whenReady().then(async () => {

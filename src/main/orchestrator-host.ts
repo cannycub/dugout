@@ -24,6 +24,7 @@ import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
+import type { LifecyclePort, LifecycleEvent } from "../core/ports/lifecycle.js";
 import type { JiraPort } from "../core/ports/jira.js";
 import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
@@ -36,12 +37,22 @@ function broadcast(event: DugoutEvent): void {
   }
 }
 
-/** Metrics port that forwards every emit to the renderer as a telemetry event (best-effort). */
-class MetricsForwarder implements MetricsPort {
-  emit(event: MetricEvent): void {
-    broadcast({ kind: "metric", name: event.name, tags: event.tags ?? {}, at: Date.now() });
+/**
+ * Metrics sink: a no-op until the real Datadog adapter lands (#13). Metrics must NEVER broadcast to
+ * the renderer (#27 de-conflation) — the old MetricsForwarder that did so was a leak, not a feature.
+ */
+class NoopMetrics implements MetricsPort {
+  emit(_event: MetricEvent): void {
+    // Intentionally silent: best-effort port kept warm so instrumentation call sites stay exercised.
   }
 }
+
+/** Lifecycle port → renderer: stamp the wire time and broadcast to every window (#27). */
+const lifecycleBroadcaster: LifecyclePort = {
+  emit(event: LifecycleEvent): void {
+    broadcast({ ...event, at: Date.now() });
+  },
+};
 
 /**
  * Open the SQLite run-state store, falling back to in-memory only if the file can't be opened
@@ -195,7 +206,8 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     jira,
     executor,
     github,
-    metrics: new MetricsForwarder(),
+    metrics: new NoopMetrics(),
+    lifecycle: lifecycleBroadcaster,
     envReplay: new FakeEnvReplay(),
     specStore: new InMemorySpecStore(),
     store: openRunStateStore(userDataDir),
