@@ -73,11 +73,24 @@ export function App() {
   // review loop can render the change as a diff. UI-held only — the contract stays canonical.
   const [prevSpecs, setPrevSpecs] = useState<Map<string, string>>(new Map());
 
+  // The roster is fetched async; track it so the view can show a loading indicator instead of the
+  // "nothing assigned" empty-state until it resolves (true on initial load and every refresh).
+  const [rosterLoading, setRosterLoading] = useState(true);
+
   // Load the developer's assigned tickets (their roster). (Datadog metrics flow through their own
   // port and never reach the renderer — only lifecycle transitions stream here, #27.)
-  useEffect(() => {
-    void dugout.listTickets().then(setTickets);
+  const loadRoster = useCallback(async () => {
+    setRosterLoading(true);
+    try {
+      setTickets(await dugout.listTickets());
+    } finally {
+      setRosterLoading(false);
+    }
   }, [dugout]);
+
+  useEffect(() => {
+    void loadRoster();
+  }, [loadRoster]);
 
   // Live lifecycle stream (#27): while a run is in flight, patch the held story in place — a `spec`
   // event re-statuses that spec by id (SpecCard/SpecLineup chips move), a `story` event re-statuses
@@ -336,7 +349,12 @@ export function App() {
         </main>
       ) : view.type === "roster" ? (
         <main className="stage stage-roster">
-          <TicketRoster tickets={tickets} onSelect={onSelect} />
+          <TicketRoster
+            tickets={tickets}
+            onSelect={onSelect}
+            onRefresh={loadRoster}
+            loading={rosterLoading}
+          />
         </main>
       ) : (
         <main className="stage">

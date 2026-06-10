@@ -234,19 +234,40 @@ function SpecCard({ spec, index, editable, reviewSelected, replaySelected, onTog
 export function TicketRoster({
   tickets,
   onSelect,
+  onRefresh,
+  loading,
 }: {
   tickets: Ticket[];
   onSelect: (key: string) => void;
+  /** Re-fetch the assigned tickets (after the dev assigns one in Jira mid-session). */
+  onRefresh: () => Promise<unknown>;
+  /** A fetch is in flight (initial load or refresh) — drives the loading indicator + button state. */
+  loading: boolean;
 }) {
   return (
     <div className="field roster-field">
       <div className="field-head">
         <span className="panel-eyebrow">Today's roster</span>
-        <span className="field-count">
-          {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
-        </span>
+        <div className="roster-actions">
+          <span className="field-count">
+            {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
+          </span>
+          <button
+            type="button"
+            className="rescan-btn"
+            onClick={() => void onRefresh()}
+            disabled={loading}
+          >
+            {loading ? "refreshing…" : "↻ refresh"}
+          </button>
+        </div>
       </div>
-      {tickets.length === 0 ? (
+      {loading && tickets.length === 0 ? (
+        // Initial load (or a refresh from empty): show progress, not the "nothing assigned" state.
+        <div className="running-note">
+          <span className="pulse-dot" /> Loading your roster…
+        </div>
+      ) : tickets.length === 0 ? (
         <p className="muted">No tickets assigned to you. Nothing to call from the dugout yet.</p>
       ) : (
         <div className="roster">
@@ -311,11 +332,19 @@ export function DeclareRepos({
   const [results, setResults] = useState<RepoMatch[]>([]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected ?? []));
   const [rescanning, setRescanning] = useState(false);
+  // A catalog search is in flight (initial load or a keystroke filter) — drives the loading
+  // indicator so an empty `results` reads as "still searching" rather than "no matches". The
+  // rescan button has its own `rescanning` flag: it must not fire on every keystroke search.
+  const [searching, setSearching] = useState(true);
 
   useEffect(() => {
     let live = true;
+    setSearching(true);
     void dugout.searchRepos(query).then((r) => {
-      if (live) setResults(r);
+      if (live) {
+        setResults(r);
+        setSearching(false);
+      }
     });
     return () => {
       live = false;
@@ -363,7 +392,11 @@ export function DeclareRepos({
       />
 
       <div className="repo-results">
-        {results.length === 0 ? (
+        {searching && results.length === 0 ? (
+          <div className="running-note">
+            <span className="pulse-dot" /> Loading the catalog…
+          </div>
+        ) : results.length === 0 ? (
           <p className="muted small">No repos match “{query}”.</p>
         ) : (
           results.map((match) => {
