@@ -80,11 +80,28 @@ export interface SpecContent {
   order: number;
 }
 
+/**
+ * One persisted entry of the spec-review thread (#5): the developer's feedback (or direct edit) at
+ * a granularity, oldest-first. Part of the canonical contract — the rationale survives with the
+ * spec and informs execution.
+ */
+export interface ReviewThreadEntry {
+  /** Granularity: the whole fan-out/set, one spec, or one section of a spec. */
+  scope: { kind: "set" } | { kind: "spec"; specId: string } | { kind: "section"; specId: string; section: string };
+  /** What the developer said (or, for a direct edit, a note that they edited the markdown). */
+  content: string;
+  /** 1-based feedback round. */
+  round: number;
+  kind: "feedback" | "direct-edit";
+}
+
 /** The contract for a whole story's fan-out (canonical-in-git). */
 export interface StorySpecs {
   key: string;
   title: string;
   specs: SpecContent[];
+  /** The spec-review thread (#5), persisted with the contract. Absent ⇒ no review rounds yet. */
+  reviewThread?: ReviewThreadEntry[];
 }
 
 /** Assembled view: a spec's contract plus its current lifecycle status. */
@@ -94,6 +111,8 @@ export interface Spec extends SpecContent {
 
 /** Assembled view of a story: contract + run-state, as handed to callers and the UI. */
 export interface Story {
+  /** The persisted spec-review thread (#5), surfaced for the review loop UI. */
+  reviewThread?: ReviewThreadEntry[];
   /** Jira issue key, e.g. "DUG-1". */
   key: string;
   title: string;

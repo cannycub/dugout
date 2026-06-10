@@ -21,6 +21,18 @@ export interface DraftInput {
    * prompt so a re-draft converges. The port stays a pure function of its input.
    */
   clarifications?: ClarificationRound[];
+  /**
+   * Revision mode (#5): present when the developer is iterating on an already-drafted spec set in
+   * the PR-review-style loop. Carries the current canonical set and this round's feedback (scope
+   * already rendered into text by the orchestrator). The agent must revise ALL affected parts so
+   * the set stays internally consistent (an AC change updates the test plan and fan-out), preserve
+   * unaffected text verbatim, and never silently override a developer's direct edit — flag
+   * introduced inconsistencies instead.
+   */
+  revision?: {
+    specs: DraftedSpec[];
+    feedback: string;
+  };
 }
 
 /**

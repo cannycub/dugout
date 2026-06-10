@@ -1324,3 +1324,71 @@ body {
   color: var(--amber);
   margin: 0;
 }
+
+/* ── Draft review loop (#5) ─────────────────────────────────────────────────────────────── */
+.draft-review {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.draft-review-spec {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.spec-diff {
+  width: 100%;
+  margin: 0;
+  border: 1px solid rgba(238, 244, 236, 0.1);
+  border-radius: 6px;
+  background: rgba(13, 21, 19, 0.6);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  padding: 8px 0;
+}
+.diff-line {
+  padding: 0 10px;
+  white-space: pre-wrap;
+}
+.diff-line.added {
+  background: rgba(84, 201, 138, 0.1);
+  color: var(--turf);
+}
+.diff-line.removed {
+  background: rgba(226, 85, 43, 0.1);
+  color: var(--clay-soft);
+}
+.diff-gutter {
+  display: inline-block;
+  width: 16px;
+  color: var(--chalk-faint);
+}
+.review-thread {
+  border-top: 1px solid rgba(238, 244, 236, 0.08);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thread-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.thread-entry {
+  font-size: 12.5px;
+  color: var(--chalk-dim);
+}
+.thread-scope {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-right: 8px;
+}

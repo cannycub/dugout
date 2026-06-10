@@ -208,5 +208,28 @@ function assemblePrompt(input: DraftInput): string {
       }
     }
   }
+  // Revision mode (#5): the PR-review-style loop. kiro is one-shot, so the harness hands it the
+  // CURRENT canonical set plus this round's feedback and the revision rules.
+  if (input.revision) {
+    lines.push(
+      "",
+      "REVISION MODE — you already drafted this set; the developer is reviewing it like a pull",
+      "request and has feedback. Revise the set and emit the COMPLETE revised set in the usual",
+      "output contract. Rules:",
+      "- Revise ALL parts affected by the feedback so the set stays internally consistent (an AC",
+      "  change updates the test plan and the fan-out).",
+      "- Preserve unaffected text verbatim — do not rewrite for style.",
+      "- The developer's own edits are authoritative: never override them; if one introduced an",
+      "  inconsistency, FLAG it in the affected spec under a 'Consistency flags' note instead.",
+      "",
+      "THE DEVELOPER'S FEEDBACK:",
+      input.revision.feedback,
+      "",
+      "CURRENT SPEC SET (the draft under review):",
+    );
+    for (const spec of input.revision.specs) {
+      lines.push(`--- spec for repo ${spec.repo} ---`, spec.markdown);
+    }
+  }
   return lines.join("\n");
 }

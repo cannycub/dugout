@@ -1,4 +1,12 @@
-import type { Story, Spec, SpecContent, StorySpecs, StoryRunState, Preflight } from "./domain.js";
+import type {
+  Story,
+  Spec,
+  SpecContent,
+  StorySpecs,
+  StoryRunState,
+  Preflight,
+  ReviewThreadEntry,
+} from "./domain.js";
 import type { ExecutorPort, ClarifyingQuestion, ClarificationRound } from "./ports/executor.js";
 import { assertNever } from "./exhaustive.js";
 import type { JiraPort, Ticket } from "./ports/jira.js";
@@ -26,6 +34,12 @@ export type DraftStoryResult =
 /** Code feedback at a review-required stop (#9): behavioural-as-a-test, or quality/structural. */
 export interface ReviewFeedback {
   kind: "test" | "quality";
+  content: string;
+}
+
+/** Spec-review feedback (#5): the developer's note at one of the three granularities. */
+export interface DraftFeedback {
+  scope: ReviewThreadEntry["scope"];
   content: string;
 }
 
@@ -235,6 +249,99 @@ export class Orchestrator {
       default:
         return assertNever(outcome, "draftStory: unhandled draft outcome");
     }
+  }
+
+  /**
+   * One round of the spec review loop (#5): the developer's conversational feedback — at set, spec,
+   * or section granularity — drives a consistent re-draft of the whole set (an AC change updates
+   * the test plan and fan-out). The agent sees the CURRENT canonical set plus the rendered
+   * feedback; a `drafted` outcome replaces the contract (ids regenerate — the fan-out may split or
+   * merge); the stop outcomes surface exactly like a first draft. The thread entry persists with
+   * the contract either way a draft lands.
+   */
+  async reviseDraft(storyKey: string, feedback: DraftFeedback): Promise<DraftStoryResult> {
+    const story = this.requireStory(storyKey);
+    if (story.status !== "drafted") {
+      throw new Error(`Story ${storyKey} is ${story.status}, cannot revise (expected drafted)`);
+    }
+    const content = this.specStore.get(storyKey)!;
+    const thread = content.reviewThread ?? [];
+    const entry: ReviewThreadEntry = {
+      scope: feedback.scope,
+      content: feedback.content,
+      round: thread.length + 1,
+      kind: "feedback",
+    };
+
+    // Re-bind the declared repos fresh (clone bindings may have moved since the draft). Without a
+    // repo scope (fake-port unit path) fall back to identity-only declarations — the fake executor
+    // never reads clones.
+    const repos = this.deps.repoScope
+      ? await this.declareRepos(story.declaredRepos)
+      : story.declaredRepos.map((name) => ({
+          identity: { name, remote: "" },
+          clone: { status: "not-cloned" as const },
+        }));
+    const outcome = await this.deps.executor.draft({
+      ticket: { key: story.key, title: story.title, description: "" },
+      repos,
+      revision: {
+        specs: story.specs.map((s) => ({ repo: s.repo, markdown: s.markdown })),
+        feedback: renderDraftFeedback(entry, thread),
+      },
+    });
+    this.emitMetric({ name: "draft.review_round", tags: { story: story.key, scope: feedback.scope.kind } });
+
+    switch (outcome.result) {
+      case "needs-info":
+        return { outcome: "needs-info", reason: outcome.reason };
+      case "needs-clarification":
+        return { outcome: "needs-clarification", questions: outcome.questions };
+      case "drafted": {
+        const specs: Spec[] = outcome.specs.map((drafted, order) => ({
+          id: `${story.key}-spec-${order + 1}`,
+          repo: drafted.repo,
+          markdown: drafted.markdown,
+          status: "drafted",
+          isReplaySpec: false,
+          reviewRequired: false,
+          reviewRecommended: drafted.reviewRecommended ?? false,
+          order,
+        }));
+        const revised: Story = { ...story, specs, reviewThread: [...thread, entry] };
+        this.persistContent(revised);
+        this.persistRun(revised);
+        this.emitStory(revised.key, "drafted");
+        return { outcome: "drafted", story: this.requireStory(storyKey) };
+      }
+      default:
+        return assertNever(outcome, "reviseDraft: unhandled draft outcome");
+    }
+  }
+
+  /**
+   * The direct-edit escape hatch (#5): the developer's markdown is applied VERBATIM to the drafted
+   * contract — never overridden by the agent — and recorded on the thread, so the next
+   * conversational revision sees the edit and is directed to flag (not fix) any inconsistencies it
+   * introduced.
+   */
+  async editSpecDraft(storyKey: string, specId: string, markdown: string): Promise<Story> {
+    const story = this.requireStory(storyKey);
+    if (story.status !== "drafted") {
+      throw new Error(`Story ${storyKey} is ${story.status}, cannot edit the draft (expected drafted)`);
+    }
+    const spec = story.specs.find((s) => s.id === specId);
+    if (!spec) throw new Error(`Story ${storyKey} has no spec ${specId}`);
+    spec.markdown = markdown;
+    const thread = this.specStore.get(storyKey)!.reviewThread ?? [];
+    const entry: ReviewThreadEntry = {
+      scope: { kind: "spec", specId },
+      content: "The developer directly edited this spec's markdown.",
+      round: thread.length + 1,
+      kind: "direct-edit",
+    };
+    this.persistContent({ ...story, reviewThread: [...thread, entry] });
+    return this.requireStory(storyKey);
   }
 
   /**
@@ -653,7 +760,7 @@ export class Orchestrator {
     return story;
   }
 
-  /** Write the canonical contract (markdown + approved plan) to the SpecStore. */
+  /** Write the canonical contract (markdown + approved plan + review thread) to the SpecStore. */
   private persistContent(story: Story): void {
     const specs: SpecContent[] = story.specs.map((s) => ({
       id: s.id,
@@ -665,7 +772,12 @@ export class Orchestrator {
       order: s.order,
       ...(s.jiraSubtaskKey ? { jiraSubtaskKey: s.jiraSubtaskKey } : {}),
     }));
-    const content: StorySpecs = { key: story.key, title: story.title, specs };
+    const content: StorySpecs = {
+      key: story.key,
+      title: story.title,
+      specs,
+      ...(story.reviewThread ? { reviewThread: story.reviewThread } : {}),
+    };
     this.specStore.putStory(content);
   }
 
@@ -692,7 +804,42 @@ export function assemble(content: StorySpecs, run: StoryRunState): Story {
     // canonical. A spec the run-state has never seen assembles at the start of its lifecycle —
     // the seed of "rebuild run-state from canonical content". See ADR-0016.
     .map((c) => ({ ...c, status: statusById.get(c.id) ?? "drafted" }));
-  return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
+  return {
+    key: content.key,
+    title: run.title,
+    status: run.status,
+    specs,
+    declaredRepos: run.declaredRepos,
+    ...(content.reviewThread ? { reviewThread: content.reviewThread } : {}),
+  };
+}
+
+/**
+ * Render a review-loop feedback entry (+ relevant thread context) into the revision request the
+ * draft agent sees (#5). Scope becomes plain language; prior direct edits are called out so the
+ * agent flags (never overrides) inconsistencies they introduced.
+ */
+function renderDraftFeedback(entry: ReviewThreadEntry, thread: ReviewThreadEntry[]): string {
+  const scopeLine =
+    entry.scope.kind === "set"
+      ? "Scope: the whole spec set / fan-out (split, merge, reorder, repo boundaries)."
+      : entry.scope.kind === "spec"
+        ? `Scope: spec ${entry.scope.specId}.`
+        : `Scope: the "${entry.scope.section}" section of spec ${entry.scope.specId}.`;
+  const lines = [scopeLine, "", entry.content];
+  const directEdits = thread.filter((t) => t.kind === "direct-edit");
+  if (directEdits.length > 0) {
+    lines.push(
+      "",
+      "Note: the developer has directly edited " +
+        directEdits
+          .map((t) => (t.scope.kind === "set" ? "the set" : t.scope.specId))
+          .join(", ") +
+        " — their edits are authoritative. Do NOT override them; if an edit introduced an" +
+        " inconsistency, FLAG it in the affected spec instead of fixing it silently.",
+    );
+  }
+  return lines.join("\n");
 }
 
 /**
