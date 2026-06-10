@@ -124,10 +124,13 @@ export function CoachCalls(props: CoachCallsProps) {
 interface SpecLineupProps {
   story: Story | null;
   reviewSel: Set<string>;
+  /** Pre-flight replay designations — the developer's, not the agent's (ADR-0008, #19). */
+  replaySel: Set<string>;
   onToggleReview: (id: string) => void;
+  onToggleReplay: (id: string) => void;
 }
 
-export function SpecLineup({ story, reviewSel, onToggleReview }: SpecLineupProps) {
+export function SpecLineup({ story, reviewSel, replaySel, onToggleReview, onToggleReplay }: SpecLineupProps) {
   if (!story) {
     return (
       <div className="field empty-field">
@@ -151,9 +154,12 @@ export function SpecLineup({ story, reviewSel, onToggleReview }: SpecLineupProps
             spec={spec}
             index={i}
             editable={editable}
-            reviewSelected={spec.isReplaySpec || reviewSel.has(spec.id)}
-            replayLocked={spec.isReplaySpec}
+            // Pre-flight, the developer's selections drive the card; once approved, the canonical
+            // contract (isReplaySpec / reviewRequired) does.
+            replaySelected={editable ? replaySel.has(spec.id) : spec.isReplaySpec}
+            reviewSelected={editable ? replaySel.has(spec.id) || reviewSel.has(spec.id) : spec.reviewRequired}
             onToggleReview={() => onToggleReview(spec.id)}
+            onToggleReplay={() => onToggleReplay(spec.id)}
           />
         ))}
       </div>
@@ -166,11 +172,12 @@ interface SpecCardProps {
   index: number;
   editable: boolean;
   reviewSelected: boolean;
-  replayLocked: boolean;
+  replaySelected: boolean;
   onToggleReview: () => void;
+  onToggleReplay: () => void;
 }
 
-function SpecCard({ spec, index, editable, reviewSelected, replayLocked, onToggleReview }: SpecCardProps) {
+function SpecCard({ spec, index, editable, reviewSelected, replaySelected, onToggleReview, onToggleReplay }: SpecCardProps) {
   const meta = SPEC_META[spec.status];
   const title = spec.markdown.split("\n", 1)[0]?.replace(/^#\s*/, "") ?? spec.id;
   const awaiting = spec.status === "green";
@@ -193,22 +200,26 @@ function SpecCard({ spec, index, editable, reviewSelected, replayLocked, onToggl
         </div>
         <h3 className="spec-title">{title}</h3>
         <div className="spec-badges">
-          {spec.isReplaySpec && <span className="badge replay">replay spec</span>}
-          {(spec.reviewRequired || (editable && reviewSelected)) && (
-            <span className="badge review">review-required</span>
-          )}
+          {replaySelected && <span className="badge replay">replay spec</span>}
+          {reviewSelected && <span className="badge review">review-required</span>}
           <span className="spec-id">{spec.id}</span>
         </div>
         {editable && (
-          <label className={`review-toggle ${replayLocked ? "locked" : ""}`}>
-            <input
-              type="checkbox"
-              checked={reviewSelected}
-              disabled={replayLocked}
-              onChange={onToggleReview}
-            />
-            {replayLocked ? "review-required (replay default)" : "mark review-required"}
-          </label>
+          <div className="preflight-toggles">
+            <label className="review-toggle">
+              <input type="checkbox" checked={replaySelected} onChange={onToggleReplay} />
+              designate as replay spec
+            </label>
+            <label className={`review-toggle ${replaySelected ? "locked" : ""}`}>
+              <input
+                type="checkbox"
+                checked={reviewSelected}
+                disabled={replaySelected}
+                onChange={onToggleReview}
+              />
+              {replaySelected ? "review-required (replay default)" : "mark review-required"}
+            </label>
+          </div>
         )}
       </div>
     </motion.div>
