@@ -54,8 +54,9 @@ export class GitHubAdapter implements GitHubPort {
    * The catalog owner can be an org OR a personal account, and `/orgs/{owner}/repos` 404s for a
    * user (the source of the resync 404 on personal accounts). Resolve the right listing endpoint:
    * - Organization → `/orgs/{owner}/repos`.
-   * - The token's OWN user account → `/user/repos?affiliation=owner`, so the developer's private
-   *   repos appear (the public `/users/{owner}/repos` would hide them).
+   * - The token's OWN user account → `/user/repos?affiliation=owner,collaborator,organization_member`,
+   *   so the developer's private repos appear (the public `/users/{owner}/repos` would hide them),
+   *   alongside repos they collaborate on and org-member repos they can access (#60 follow-up).
    * - Any other user → public `/users/{owner}/repos`.
    */
   private async resolveRepoListUrl(owner: string): Promise<string> {
@@ -65,7 +66,7 @@ export class GitHubAdapter implements GitHubPort {
     }
     const me = (await this.get(`https://api.github.com/user`)) as { login?: string };
     return me.login?.toLowerCase() === owner.toLowerCase()
-      ? `https://api.github.com/user/repos?affiliation=owner`
+      ? `https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member`
       : `https://api.github.com/users/${owner}/repos`;
   }
 

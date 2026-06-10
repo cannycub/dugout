@@ -84,10 +84,11 @@ describe("GitHubAdapter (real REST adapter, #10)", () => {
     expect(calls.some((c) => c.url.includes("/users/acme/repos"))).toBe(false); // not the user path
   });
 
-  it("lists a personal account's own repos via /user/repos (so private repos appear too)", async () => {
+  it("lists a personal account's own + collaborator + org-member repos via /user/repos", async () => {
     // The owner is the token's own user account — 404 on /orgs, and /users/{owner}/repos would hide
-    // private repos. /user/repos with affiliation=owner returns the developer's own repos, private
-    // included.
+    // private repos. /user/repos with affiliation=owner,collaborator,organization_member returns the
+    // developer's own repos (private included) plus repos they collaborate on and org-member repos
+    // they can access (#60 follow-up).
     const { calls, impl } = fakeGitHubApi({ accountType: "User", authedLogin: "acme" });
 
     const repos = await adapter(impl).listOrgRepos();
@@ -95,7 +96,7 @@ describe("GitHubAdapter (real REST adapter, #10)", () => {
     expect(repos).toEqual([{ name: "widget-api", remote: "git@github.com:acme/widget-api.git" }]);
     const listed = calls.find((c) => c.url.includes("/repos") && c.url.includes("page="))!;
     expect(listed.url).toContain("https://api.github.com/user/repos");
-    expect(listed.url).toContain("affiliation=owner");
+    expect(listed.url).toContain("affiliation=owner,collaborator,organization_member");
     expect(calls.some((c) => c.url.includes("/orgs/"))).toBe(false); // never the org endpoint
   });
 
