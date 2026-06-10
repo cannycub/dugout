@@ -8,6 +8,8 @@ import type { DraftStoryResult } from "../../core/orchestrator.js";
 import { useDugout } from "./dugout-context.js";
 import { SettingsPanel } from "./settings.js";
 import { ReviewBench } from "./review-bench.js";
+import { DraftReview } from "./draft-review.js";
+import type { ReviewThreadEntry } from "../../core/domain.js";
 import {
   StatusRibbon,
   StoryPanel,
@@ -67,6 +69,9 @@ export function App() {
   const [replaySel, setReplaySel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Each spec's markdown as of the previous revision (#5): captured before a re-draft lands so the
+  // review loop can render the change as a diff. UI-held only — the contract stays canonical.
+  const [prevSpecs, setPrevSpecs] = useState<Map<string, string>>(new Map());
 
   // Load the developer's assigned tickets (their roster). (Datadog metrics flow through their own
   // port and never reach the renderer — only lifecycle transitions stream here, #27.)
@@ -240,6 +245,35 @@ export function App() {
     guard(async () => setView({ type: "story", story: await dugout.resume(storyKey) }));
   const onRestart = () =>
     guard(async () => setView({ type: "story", story: await dugout.restart(storyKey) }));
+  // One spec-review round (#5): snapshot the current set for the diff, request the revision, and
+  // route the outcome — drafted refreshes the set; needs-clarification re-enters the standard
+  // clarify loop (re-binding the declared repos); needs-info kicks back like a first draft.
+  const onRevise = (scope: ReviewThreadEntry["scope"], content: string) =>
+    guard(async () => {
+      if (view.type !== "story") return;
+      const snapshot = new Map(view.story.specs.map((s) => [s.id, s.markdown]));
+      const result = await dugout.reviseDraft(storyKey, { scope, content });
+      if (result.outcome === "drafted") {
+        setPrevSpecs(snapshot);
+        seedRecommendations(result.story);
+        setView({ type: "story", story: result.story });
+      } else {
+        const ticket = tickets.find((t) => t.key === storyKey);
+        if (!ticket) return;
+        const repos = await dugout.declareRepos(view.story.declaredRepos);
+        applyDraftResult(result, ticket, repos, []);
+      }
+    });
+
+  const onDirectEdit = (specId: string, markdown: string) =>
+    guard(async () => {
+      if (view.type !== "story") return;
+      const snapshot = new Map(view.story.specs.map((s) => [s.id, s.markdown]));
+      const story = await dugout.editSpecDraft(storyKey, specId, markdown);
+      setPrevSpecs(snapshot);
+      setView({ type: "story", story });
+    });
+
   const onSubmitFeedback = (kind: "test" | "quality", content: string) =>
     guard(async () =>
       setView({ type: "story", story: await dugout.submitReviewFeedback(storyKey, { kind, content }) }),
@@ -327,6 +361,15 @@ export function App() {
           </div>
 
           <div className="col col-center">
+            {view.type === "story" && view.story.status === "drafted" && (
+              <DraftReview
+                story={view.story}
+                previous={prevSpecs}
+                busy={busy}
+                onRevise={onRevise}
+                onDirectEdit={onDirectEdit}
+              />
+            )}
             {view.type === "story" && view.story.status === "awaiting-review" && (
               <ReviewBench
                 story={view.story}

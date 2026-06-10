@@ -291,3 +291,29 @@ describe("KiroDraftAdapter.draft", () => {
     ).rejects.toThrow(/spec/i);
   });
 });
+
+describe("revision mode (#5) — the PR-review-style re-draft", () => {
+  it("folds the current set + the feedback into the prompt with consistency directives", async () => {
+    const captured: { inv?: KiroInvocation } = {};
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: capturing(captured) });
+
+    await adapter.draft({
+      ticket: TICKET,
+      repos: [await declaredClone("web")],
+      revision: {
+        specs: [{ repo: "web", markdown: "# Spec v1\n- [ ] AC one" }],
+        feedback: "Scope: the whole spec set.\n\nSplit AC two into its own spec.",
+      },
+    });
+
+    const prompt = captured.inv!.prompt;
+    // The current canonical set is in the prompt, attributed per repo…
+    expect(prompt).toContain("# Spec v1");
+    expect(prompt).toMatch(/CURRENT SPEC SET|current draft/i);
+    // …with this round's feedback and the revision rules.
+    expect(prompt).toContain("Split AC two into its own spec.");
+    expect(prompt).toMatch(/internally consistent/i);
+    expect(prompt).toMatch(/verbatim/i);
+    expect(prompt).toMatch(/flag/i);
+  });
+});

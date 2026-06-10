@@ -560,3 +560,51 @@ describe("App — review bench at a review-required stop (#9)", () => {
     expect(await screen.findByText("Spec one — corrected")).toBeTruthy();
   });
 });
+
+describe("App — spec review loop on a drafted set (#5)", () => {
+  it("set-level feedback re-drafts, shows the revision as a diff, and renders the thread", async () => {
+    renderApp({
+      draft: [
+        { result: "drafted", specs: [{ repo: "widget-api", markdown: "# Spec\nAC one" }] },
+        { result: "drafted", specs: [{ repo: "widget-api", markdown: "# Spec\nAC one\nAC two" }] },
+      ],
+    });
+
+    fireEvent.click(await button(/Stream widget events/));
+    fireEvent.click(await button(/widget-api/));
+    fireEvent.click(await button(/declare 1 & draft/i));
+    expect(await screen.findByText("Spec review")).toBeTruthy();
+
+    // Fan-out granularity is the default (reviewed first); send conversational feedback.
+    fireEvent.change(await screen.findByLabelText(/spec feedback/i), {
+      target: { value: "Add the second AC." },
+    });
+    fireEvent.click(await button(/request revision/i));
+
+    // The thread persists and renders; the revision is inspectable as a diff with the added line.
+    expect(await screen.findByText("Add the second AC.")).toBeTruthy();
+    fireEvent.click(await button(/show diff/i));
+    const diff = await screen.findByLabelText(/diff for DUG-101-spec-1/i);
+    expect(diff.textContent).toContain("+AC two");
+  });
+
+  it("direct edit saves verbatim and is marked on the thread as the developer's", async () => {
+    renderApp({
+      draft: { result: "drafted", specs: [{ repo: "widget-api", markdown: "# Spec v1" }] },
+    });
+    fireEvent.click(await button(/Stream widget events/));
+    fireEvent.click(await button(/widget-api/));
+    fireEvent.click(await button(/declare 1 & draft/i));
+
+    fireEvent.click(await button(/edit directly/i));
+    fireEvent.change(await screen.findByLabelText(/edit DUG-101-spec-1/i), {
+      target: { value: "# Spec v1 — dev edited" },
+    });
+    fireEvent.click(await button(/save edit \(verbatim\)/i));
+
+    // The card re-renders from the canonical contract with the developer's text, and the thread
+    // records the edit (✎ marker = direct edit, not conversational feedback).
+    expect(await screen.findByText("Spec v1 — dev edited")).toBeTruthy();
+    expect(await screen.findByText(/✎/)).toBeTruthy();
+  });
+});
