@@ -27,7 +27,11 @@ export async function resolveSandboxImage(tag: string, run: RunCommand): Promise
   const byTag = await run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]);
   if (byTag.exitCode === 0) return byTag.stdout.trim();
 
-  const repository = tag.slice(0, tag.lastIndexOf(":"));
+  const colonIndex = tag.lastIndexOf(":");
+  if (colonIndex === -1) {
+    throw new Error(`Invalid image tag format (missing colon): ${tag}`);
+  }
+  const repository = tag.slice(0, colonIndex);
   const listing = await run("docker", [
     "images",
     repository,
