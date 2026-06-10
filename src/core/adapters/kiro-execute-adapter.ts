@@ -31,8 +31,14 @@ export interface KiroExecuteDeps {
    * handle starts the container once with an empty agent env and never re-applies it per exec (it
    * execs into the running container). So the build agent's secrets — kiro's `KIRO_API_KEY` — must
    * ride the sandbox provider's launch env to reach kiro at all.
+   *
+   * May be async: the docker wiring resolves the toolchain image tag to its immutable ID first,
+   * which shells out to the docker CLI (stale-tag immunity, #37).
    */
-  sandboxFor: (toolchain: Toolchain, env: Record<string, string>) => SandboxProvider;
+  sandboxFor: (
+    toolchain: Toolchain,
+    env: Record<string, string>,
+  ) => SandboxProvider | Promise<SandboxProvider>;
   /** Build the kiro *build* agent provider, given the api key resolved at call time. */
   makeAgent: (apiKey: string) => AgentProvider;
   /** Resolve a declared repo name to its local clone path (Sandcastle cwd). */
@@ -115,7 +121,7 @@ export class KiroExecuteAdapter {
     const sandbox = await this.deps.createSandbox({
       branch: specBranch,
       baseBranch: input.baseBranch,
-      sandbox: this.deps.sandboxFor(config.toolchain, buildAgent.env),
+      sandbox: await this.deps.sandboxFor(config.toolchain, buildAgent.env),
       cwd,
     });
     try {

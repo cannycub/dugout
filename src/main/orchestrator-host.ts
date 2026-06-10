@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { BrowserWindow, safeStorage } from "electron";
 import { Orchestrator } from "../core/orchestrator.js";
 import { FakeJira } from "../core/fakes/fake-jira.js";
@@ -18,6 +19,7 @@ import { spawnKiroRunner } from "../core/adapters/kiro-runner.js";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "../core/adapters/kiro-execute-adapter.js";
+import { resolveSandboxImage, type RunCommand } from "../core/adapters/docker-image.js";
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
@@ -28,6 +30,14 @@ import type { JiraPort } from "../core/ports/jira.js";
 import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
+
+/** Non-throwing CLI runner for sandbox image resolution (a non-zero exit is a result, not an error). */
+const runCommand: RunCommand = (cmd, args) =>
+  new Promise((resolve) => {
+    execFile(cmd, args, (error, stdout) => {
+      resolve({ exitCode: error ? ((error as { code?: number }).code ?? 1) : 0, stdout });
+    });
+  });
 
 /** Broadcast a telemetry event to every renderer window. */
 function broadcast(event: DugoutEvent): void {
@@ -155,10 +165,15 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     createSandbox,
     // The Repo config's `toolchain` selects the Dugout-owned kiro+toolchain image (ADR-0015 clause 4;
     // `build:sandbox` targets). Overridable per toolchain for local image iteration.
-    sandboxFor: (toolchain: Toolchain, env) =>
+    sandboxFor: async (toolchain: Toolchain, env) =>
       docker({
-        imageName:
+        // Resolve the tag to its immutable image ID per run: Docker Desktop's containerd store
+        // intermittently drops the tag→image reference (with a self-heal re-tag), which would
+        // otherwise kill Sand Castle's by-name preflight (#37).
+        imageName: await resolveSandboxImage(
           process.env[`DUGOUT_SANDBOX_IMAGE_${toolchain.toUpperCase()}`] ?? `dugout-sandbox-${toolchain}:local`,
+          runCommand,
+        ),
         // Our images bake the `agent` user at uid/gid 1000 (sandbox/Dockerfile.base). Pin the container
         // to it so Sand Castle's UID preflight — which otherwise expects the host uid — matches the
         // image. Aligning bind-mount ownership across host OSes is part of the deferred
