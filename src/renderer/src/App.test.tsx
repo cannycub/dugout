@@ -467,3 +467,44 @@ describe("App — agent review recommendation at pre-flight (#6)", () => {
     await button(/push & open prs/i); // no "resume after review" stop on the way
   });
 });
+
+describe("App — settings surface (#17)", () => {
+  it("opens settings, adds a workspace root, and connects Jira (configured chips update)", async () => {
+    renderApp();
+
+    fireEvent.click(await button(/settings/i));
+    expect(await screen.findByText("Workspace roots")).toBeTruthy();
+
+    // Add a root → it appears in the list and the clones rescan (no restart).
+    fireEvent.change(await screen.findByLabelText(/add workspace root/i), {
+      target: { value: "/ws/new-root" },
+    });
+    fireEvent.click(await button(/add root/i));
+    expect(await screen.findByText("/ws/new-root")).toBeTruthy();
+    expect(await screen.findByText(/clones rescanned/i)).toBeTruthy();
+
+    // Connect Jira → the chip flips to connected; the token field never echoes the secret.
+    fireEvent.change(await screen.findByLabelText(/jira base url/i), {
+      target: { value: "https://acme.atlassian.net" },
+    });
+    fireEvent.change(await screen.findByLabelText(/jira email/i), { target: { value: "d@a.com" } });
+    fireEvent.change(await screen.findByLabelText(/jira api token/i), { target: { value: "tok-secret" } });
+    fireEvent.click(await button(/save & connect/i));
+
+    expect(await screen.findByText("connected")).toBeTruthy();
+    expect((screen.getByLabelText(/jira api token/i) as HTMLInputElement).value).toBe("");
+
+    // Clear reverts to not connected.
+    fireEvent.click(await button(/^clear$/i));
+    expect(await screen.findByText("not connected")).toBeTruthy();
+  });
+
+  it("saves and clears a GitHub token through the same store", async () => {
+    renderApp();
+    fireEvent.click(await button(/settings/i));
+
+    fireEvent.change(await screen.findByLabelText(/github token/i), { target: { value: "ghp_x" } });
+    fireEvent.click(await button(/save token/i));
+    expect(await screen.findByText("token saved")).toBeTruthy();
+  });
+});

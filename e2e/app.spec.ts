@@ -33,6 +33,27 @@ test.afterAll(async () => {
   await Promise.all(tmpDirs.map((d) => rm(d, { recursive: true, force: true })));
 });
 
+test("settings button is excluded from the titlebar drag region and opens the panel", async () => {
+  // The topbar is a `-webkit-app-region: drag` strip (hiddenInset titlebar). A real OS mouse
+  // click on an element inside it is consumed by the window-drag hit-test unless that element
+  // opts out with `no-drag` — the click below (CDP-injected) BYPASSES that hit-test, so it can't
+  // reproduce the swallowing. The computed-style assertion is the regression lockdown; the click
+  // assertion proves the React/IPC path behind the button.
+  await expect(win.locator(".settings-gear")).toBeVisible();
+  const appRegion = await win.evaluate(() => {
+    const s = getComputedStyle(document.querySelector(".settings-gear")!) as CSSStyleDeclaration & {
+      webkitAppRegion?: string;
+    };
+    return s.webkitAppRegion ?? s.getPropertyValue("-webkit-app-region");
+  });
+  expect(appRegion).toBe("no-drag");
+
+  await win.getByRole("button", { name: /settings/i }).click();
+  await expect(win.getByText("Workspace roots")).toBeVisible();
+  await win.getByRole("button", { name: /back/i }).click();
+  await expect(win.getByText(/Stream widget events into the replay pipeline/)).toBeVisible();
+});
+
 test("fake ticket flows select → declare → draft → approve → run → review stop → resume → PRs", async () => {
   await expect(win.getByText(/Stream widget events into the replay pipeline/)).toBeVisible();
 

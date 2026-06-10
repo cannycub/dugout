@@ -22,7 +22,10 @@ import { KiroExecuteAdapter, REPORT_STDOUT_TAIL_CHARS } from "../core/adapters/k
 import { resolveSandboxImage, type RunCommand } from "../core/adapters/docker-image.js";
 import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
-import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
+import { JiraCredentialStore, jiraCredentialsFromEnv, type JiraCredentials } from "./jira-credentials.js";
+import { SettingsStore } from "./settings-store.js";
+import { SecretsStore } from "./secrets-store.js";
+import { makeSettingsControls, SwappableJira, type SettingsApi } from "./settings-controls.js";
 import { notifyNative } from "./notifications.js";
 import { DatadogMetrics } from "../core/adapters/datadog-metrics.js";
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
@@ -150,7 +153,9 @@ function fakeExecuteSeam(fake: FakeExecutor): (input: ExecuteInput) => Promise<E
  * stopgap until the settings UI #17 lands); otherwise the seed fake keeps dev/test working without
  * live Jira.
  */
-export async function createOrchestrator(userDataDir: string): Promise<Orchestrator> {
+export async function createOrchestrator(
+  userDataDir: string,
+): Promise<{ orchestrator: Orchestrator; settings: SettingsApi }> {
   // Live GitHub when the developer's token + org are configured (env until the settings UI #17
   // owns them): the org catalog goes live (replacing the seed list) and PRs open for real. The
   // REST API directly — never the `gh` CLI (end users won't have it). Push is a git operation on
@@ -167,15 +172,25 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
         })
       : new FakeGitHub(SEED_CATALOG);
 
-  // Live Jira when the developer has saved credentials (ADR-0005); else the env-var stopgap (until
-  // the settings UI #17 lands — nothing yet calls save(), so env is the only path to live Jira);
-  // else the seed fake keeps dev/test working without live Jira.
-  let jira: JiraPort = new FakeJira({ tickets: [SEED_TICKET] });
-  const saved = await new JiraCredentialStore(join(userDataDir, "jira.cred"), safeStorage).load();
-  const creds = saved ?? jiraCredentialsFromEnv();
-  if (creds) jira = new JiraReadAdapter(creds);
+  // Settings + secrets (#17, ADR-0017): non-secret config in settings.json; secrets in ONE keyed
+  // safeStorage blob (legacy single-purpose Jira store folded in once).
+  const settingsStore = new SettingsStore(join(userDataDir, "settings.json"));
+  const secrets = new SecretsStore(join(userDataDir, "secrets.enc"), safeStorage);
+  await secrets.migrateLegacyJira(new JiraCredentialStore(join(userDataDir, "jira.cred"), safeStorage));
 
-  const gitWorkspace = new GitWorkspace({ roots: workspaceRoots() });
+  // Live Jira when the developer has saved credentials (settings UI / migrated store), else the
+  // env-var stopgap, else the seed fake. Wrapped swappable so a settings save/clear re-points the
+  // running orchestrator without a restart (#17).
+  const fallbackJira: JiraPort = new FakeJira({ tickets: [SEED_TICKET] });
+  const storedJira = await secrets.get("jira");
+  const creds = (storedJira ? (JSON.parse(storedJira) as JiraCredentials) : null) ?? jiraCredentialsFromEnv();
+  const jira = new SwappableJira(creds ? new JiraReadAdapter(creds) : fallbackJira);
+
+  // Workspace roots: settings-owned, env stopgap honoured when settings are empty. The thunk keeps
+  // them LIVE — saveWorkspaceRoots updates the variable and rescans, no restart (#17).
+  let currentRoots = (await settingsStore.load()).workspaceRoots;
+  if (currentRoots.length === 0) currentRoots = workspaceRoots();
+  const gitWorkspace = new GitWorkspace({ roots: () => currentRoots });
   const repoScope = new RepoScope(new GitHubCatalog(github), gitWorkspace);
 
   // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
@@ -301,7 +316,20 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
         : async (repo, storyKey, specId) =>
             gitWorkspace.mergeIntoStoryBranch(await repoScope.resolveClonePath(repo), storyKey, specId),
   });
-  return orchestrator;
+  const settings = makeSettingsControls({
+    settingsStore,
+    secrets,
+    jira,
+    fallbackJira,
+    makeJiraAdapter: (c) => new JiraReadAdapter(c),
+    applyWorkspaceRoots: async (roots) => {
+      currentRoots = roots;
+      await repoScope.rescan(); // clone bindings reflect the new roots immediately
+    },
+    encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+  });
+
+  return { orchestrator, settings };
 }
 
 export { broadcast };

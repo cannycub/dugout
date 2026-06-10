@@ -10,7 +10,7 @@ import type { Ticket } from "../../core/ports/jira.js";
 import type { DraftOutcome } from "../../core/ports/executor.js";
 import type { MetricsPort, MetricEvent } from "../../core/ports/metrics.js";
 import type { LifecyclePort, LifecycleEvent } from "../../core/ports/lifecycle.js";
-import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
+import type { DugoutApi, DugoutEvent, SettingsView, JiraCredentialsInput } from "../../shared/dugout-api.js";
 
 export interface LocalSeed {
   /** The developer's assigned tickets (their roster). */
@@ -67,6 +67,24 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     repoScope: seed.repoScope,
   });
 
+  // In-memory settings state (#17): same DugoutApi surface as the Electron host, no persistence —
+  // the e2e/App tests drive the settings UI against this; the real stores are main-process glue.
+  const settingsState: { roots: string[]; jira: JiraCredentialsInput | null; github: string | null } = {
+    roots: [],
+    jira: null,
+    github: null,
+  };
+  const settingsView = async (): Promise<SettingsView> => ({
+    workspaceRoots: settingsState.roots,
+    jira: {
+      baseUrl: settingsState.jira?.baseUrl ?? "",
+      email: settingsState.jira?.email ?? "",
+      configured: settingsState.jira !== null,
+    },
+    github: { configured: settingsState.github !== null },
+    encryptionAvailable: true,
+  });
+
   return {
     listTickets: () => orchestrator.listAssignedTickets(),
     getStory: async (key) => orchestrator.getStory(key) ?? null,
@@ -84,6 +102,28 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     resume: (key) => orchestrator.resumeAfterReview(key),
     restart: (key) => orchestrator.restartStory(key),
     createPullRequests: (key) => orchestrator.createPullRequests(key),
+    getSettings: settingsView,
+    saveWorkspaceRoots: async (roots) => {
+      settingsState.roots = roots.map((r) => r.trim()).filter(Boolean);
+      await orchestrator.rescanRepos();
+      return settingsView();
+    },
+    saveJiraCredentials: async (creds) => {
+      settingsState.jira = creds;
+      return settingsView();
+    },
+    clearJiraCredentials: async () => {
+      settingsState.jira = null;
+      return settingsView();
+    },
+    saveGitHubToken: async (token) => {
+      settingsState.github = token;
+      return settingsView();
+    },
+    clearGitHubToken: async () => {
+      settingsState.github = null;
+      return settingsView();
+    },
     onEvent: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

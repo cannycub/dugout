@@ -7,6 +7,8 @@ import { CHANNELS } from "../shared/dugout-api.js";
 import type { DeclaredRepo } from "../core/repo-scope.js";
 import type { ClarificationRound } from "../core/ports/executor.js";
 import { createOrchestrator } from "./orchestrator-host.js";
+import type { SettingsApi } from "./settings-controls.js";
+import type { JiraCredentialsInput } from "../shared/dugout-api.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -76,9 +78,22 @@ function registerIpc(orchestrator: Orchestrator): void {
   );
 }
 
+/** Settings IPC (#17): thin pass-throughs to the host-side settings controls. */
+function registerSettingsIpc(settings: SettingsApi): void {
+  ipcMain.handle(CHANNELS.getSettings, () => settings.getSettings());
+  ipcMain.handle(CHANNELS.saveWorkspaceRoots, (_e, roots: string[]) => settings.saveWorkspaceRoots(roots));
+  ipcMain.handle(CHANNELS.saveJiraCredentials, (_e, creds: JiraCredentialsInput) =>
+    settings.saveJiraCredentials(creds),
+  );
+  ipcMain.handle(CHANNELS.clearJiraCredentials, () => settings.clearJiraCredentials());
+  ipcMain.handle(CHANNELS.saveGitHubToken, (_e, token: string) => settings.saveGitHubToken(token));
+  ipcMain.handle(CHANNELS.clearGitHubToken, () => settings.clearGitHubToken());
+}
+
 app.whenReady().then(async () => {
-  const orchestrator = await createOrchestrator(app.getPath("userData"));
+  const { orchestrator, settings } = await createOrchestrator(app.getPath("userData"));
   registerIpc(orchestrator);
+  registerSettingsIpc(settings);
   createWindow();
 
   app.on("activate", () => {
