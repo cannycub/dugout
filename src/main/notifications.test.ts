@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { notificationFor } from "./notifications.js";
+import { notificationFor } from "./notification-mapping.js";
 
 /**
  * #14 — the core-boundary contract: which lifecycle transitions become native OS notifications,
