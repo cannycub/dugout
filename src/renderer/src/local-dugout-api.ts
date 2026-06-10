@@ -103,6 +103,8 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     restart: (key) => orchestrator.restartStory(key),
     createPullRequests: (key) => orchestrator.createPullRequests(key),
     submitReviewFeedback: (key, feedback) => orchestrator.submitReviewFeedback(key, feedback),
+    reviseDraft: (key, feedback) => orchestrator.reviseDraft(key, feedback),
+    editSpecDraft: (key, specId, markdown) => orchestrator.editSpecDraft(key, specId, markdown),
     amendSpec: (key, specId, markdown) => orchestrator.amendSpec(key, specId, markdown),
     getSettings: settingsView,
     saveWorkspaceRoots: async (roots) => {
