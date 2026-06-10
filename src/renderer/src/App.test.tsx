@@ -508,3 +508,55 @@ describe("App — settings surface (#17)", () => {
     expect(await screen.findByText("token saved")).toBeTruthy();
   });
 });
+
+describe("App — review bench at a review-required stop (#9)", () => {
+  const twoSpecDraft = {
+    result: "drafted" as const,
+    specs: [
+      { repo: "widget-api", markdown: "# Spec one" },
+      { repo: "widget-api", markdown: "# Spec two" },
+    ],
+  };
+
+  async function driveToReviewStop() {
+    fireEvent.click(await button(/Stream widget events/));
+    fireEvent.click(await button(/widget-api/));
+    fireEvent.click(await button(/declare 1 & draft/i));
+    const replayToggles = await screen.findAllByText("designate as replay spec");
+    fireEvent.click(replayToggles[0]!); // replay ⇒ review-required ⇒ the run stops after spec-1
+    fireEvent.click(await button(/approve spec set/i));
+    fireEvent.click(await button(/run story/i));
+    await button(/resume after review/i); // the stop is reached
+  }
+
+  it("submits quality feedback in place and stays at the stop", async () => {
+    renderApp({ draft: twoSpecDraft });
+    await driveToReviewStop();
+
+    expect(await screen.findByText("Code review")).toBeTruthy();
+    fireEvent.click(screen.getByText("quality note"));
+    fireEvent.change(await screen.findByLabelText(/quality feedback/i), {
+      target: { value: "Extract the parser." },
+    });
+    fireEvent.click(await button(/iterate in place/i));
+
+    // The refinement merged; the stop continues (resume still offered, bench still present).
+    expect(await button(/resume after review/i)).toBeTruthy();
+    expect(screen.getByText("Code review")).toBeTruthy();
+  });
+
+  it("amends a wrong spec with a cascade warning and re-runs to the stop again", async () => {
+    renderApp({ draft: twoSpecDraft });
+    await driveToReviewStop();
+
+    fireEvent.click(await button(/amend DUG-101-spec-1/i));
+    const editor = await screen.findByLabelText(/amend DUG-101-spec-1/i);
+    fireEvent.change(editor, { target: { value: "# Spec one — corrected" } });
+    fireEvent.click(await button(/amend & re-run clean/i));
+
+    // The corrected spec re-ran clean and paused at its review stop again; the card now renders
+    // the corrected contract (SpecCard strips the leading heading marker for the title).
+    expect(await button(/resume after review/i)).toBeTruthy();
+    expect(await screen.findByText("Spec one — corrected")).toBeTruthy();
+  });
+});

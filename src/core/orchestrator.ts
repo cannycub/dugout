@@ -23,6 +23,12 @@ export type DraftStoryResult =
   | { outcome: "needs-info"; reason: string }
   | { outcome: "needs-clarification"; questions: ClarifyingQuestion[] };
 
+/** Code feedback at a review-required stop (#9): behavioural-as-a-test, or quality/structural. */
+export interface ReviewFeedback {
+  kind: "test" | "quality";
+  content: string;
+}
+
 /**
  * Jira write-back configuration (#11): the event→transition map is per-project (workflow names
  * differ across Jira projects), so it is injected, not hardcoded. Presence of the config object
@@ -88,6 +94,8 @@ export interface OrchestratorDeps {
 export class Orchestrator {
   private readonly specStore: SpecStore;
   private readonly runState: RunStateStore;
+  /** Feedback rounds per story within a review stop (#9) — in-memory; see submitReviewFeedback. */
+  private readonly feedbackRounds = new Map<string, number>();
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.specStore = deps.specStore ?? new InMemorySpecStore();
@@ -331,6 +339,96 @@ export class Orchestrator {
     this.emitStory(story.key, "executing");
     this.emitMetric({ name: "story.resumed_after_review", tags: { story: story.key } });
     return this.advanceFrom(story, next === -1 ? story.specs.length : next);
+  }
+
+  /**
+   * Iterate in place at a review-required stop (#9): run the developer's code feedback as a
+   * refinement pass on top of the story branch — behavioural feedback as a must-pass failing test,
+   * quality/structural feedback as an NL change-request with the suite-stays-green gate. A green
+   * refinement merges onto the story branch; the SAME stop continues (the developer resumes when
+   * satisfied). A failed refinement throws with the grade's reason and leaves the merged story
+   * untouched at the stop — deliberate, human-directed iteration on completed green code, not the
+   * banned mid-build resume (invariant 1).
+   */
+  async submitReviewFeedback(storyKey: string, feedback: ReviewFeedback): Promise<Story> {
+    const story = this.requireStory(storyKey);
+    if (story.status !== "awaiting-review") {
+      throw new Error(
+        `Story ${storyKey} is ${story.status}, cannot take code feedback (expected awaiting-review)`,
+      );
+    }
+    // The spec under review: the most recently merged spec (the one whose stop we are in).
+    const spec = [...story.specs].reverse().find((s) => s.status === "merged");
+    if (!spec) throw new Error(`Story ${storyKey} is awaiting review but has no merged spec`);
+
+    // Rounds restart at 1 after an app restart — safe, because execute() re-forks (clears) an
+    // existing branch of the same name rather than resuming it (ADR-0013).
+    const round = (this.feedbackRounds.get(storyKey) ?? 0) + 1;
+    this.feedbackRounds.set(storyKey, round);
+    const refinementId = `${spec.id}-fb${round}`;
+
+    const baseBranch = await (this.deps.resolveBaseBranch?.(spec.repo, story.key) ??
+      Promise.resolve("main"));
+    const outcome = await this.deps.executor.execute({
+      specId: refinementId,
+      repo: spec.repo,
+      markdown: feedbackMarkdown(feedback),
+      storyKey: story.key,
+      baseBranch,
+    });
+    if (outcome.result !== "green") {
+      // The refinement failed — surface why, but the story (already merged, already green) is
+      // untouched and still paused at the stop for another attempt or a resume.
+      const reason = outcome.result === "red" ? outcome.reason : outcome.reason;
+      throw new Error(`Review feedback round ${round} did not go green: ${reason}`);
+    }
+    await this.deps.mergeToStoryBranch?.(spec.repo, story.key, refinementId);
+    this.emitMetric({
+      name: "review.feedback_round",
+      tags: { story: story.key, spec: spec.id, kind: feedback.kind, round },
+    });
+    return this.requireStory(storyKey);
+  }
+
+  /**
+   * "The spec was wrong" (#9): amend the canonical contract and re-run it clean from the current
+   * story-branch HEAD (no magic-rewind). Downstream specs that had already merged are invalidated —
+   * the cascade — flagged in the return value and reset to re-run in order from the corrected HEAD
+   * (pausing at any review-required stop on the way; never silent).
+   */
+  async amendSpec(
+    storyKey: string,
+    specId: string,
+    markdown: string,
+  ): Promise<{ story: Story; cascade: string[] }> {
+    const story = this.requireStory(storyKey);
+    if (story.status !== "awaiting-review" && story.status !== "dev-complete") {
+      throw new Error(
+        `Story ${storyKey} is ${story.status}, cannot amend a spec ` +
+          `(expected awaiting-review or dev-complete; edit the draft via the review loop instead)`,
+      );
+    }
+    const index = story.specs.findIndex((s) => s.id === specId);
+    if (index === -1) throw new Error(`Story ${storyKey} has no spec ${specId}`);
+
+    const spec = story.specs[index]!;
+    spec.markdown = markdown;
+    this.persistContent(story); // the corrected contract is canonical
+
+    // Cascade: downstream specs whose merged work now stacks on an invalidated contract.
+    const cascade = story.specs.slice(index + 1).filter((s) => s.status === "merged").map((s) => s.id);
+    for (let i = index; i < story.specs.length; i++) {
+      story.specs[i]!.status = "approved";
+    }
+    story.status = "executing";
+    this.persistRun(story);
+    this.emitStory(story.key, "executing");
+    this.emitMetric({
+      name: "spec.amended",
+      tags: { story: story.key, spec: specId, cascade: cascade.length },
+    });
+    const advanced = await this.advanceFrom(story, index);
+    return { story: advanced, cascade };
   }
 
   /**
@@ -595,6 +693,31 @@ export function assemble(content: StorySpecs, run: StoryRunState): Story {
     // the seed of "rebuild run-state from canonical content". See ADR-0016.
     .map((c) => ({ ...c, status: statusById.get(c.id) ?? "drafted" }));
   return { key: content.key, title: run.title, status: run.status, specs, declaredRepos: run.declaredRepos };
+}
+
+/**
+ * Frame the developer's code feedback as the refinement run's spec markdown (#9). The executor
+ * treats it like any spec build: red→green for the supplied test, suite-green gate either way.
+ */
+function feedbackMarkdown(feedback: ReviewFeedback): string {
+  if (feedback.kind === "test") {
+    return [
+      "# Review feedback — behavioural, expressed as a must-pass failing test",
+      "",
+      "The reviewer supplied this failing test. Add it to the suite verbatim (adapt only imports/",
+      "placement), confirm it fails, then change the code to make it green:",
+      "",
+      feedback.content,
+    ].join("\n");
+  }
+  return [
+    "# Review feedback — quality/structural (no behaviour change)",
+    "",
+    feedback.content,
+    "",
+    "Do NOT change externally observable behaviour: the full suite must stay green, with no tests",
+    "modified or removed.",
+  ].join("\n");
 }
 
 /**
