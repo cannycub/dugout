@@ -37,10 +37,19 @@ state for a config change):
 - **Jira**: the orchestrator holds a `SwappableJira` (a delegating `JiraPort`). Saving credentials
   swaps the inner adapter to a fresh `JiraReadAdapter`; clearing swaps back to the seed fake. The
   orchestrator never knows.
+- **GitHub**: same swappable-port seam — the orchestrator + catalog share a `SwappableGitHub`.
+  Saving org + token swaps in a fresh `GitHubAdapter` (org → `settings.json`, token → secrets);
+  clearing the token reverts to the seed fake (the org is retained so re-entering the token
+  reconnects).
+- **kiro API key**: the executor adapters (`spawnKiroRunner`, `KiroExecuteAdapter`) take the key as
+  a **getter** (`ApiKeySource = string | (() => string | undefined)`) and resolve it per run, so a
+  save updates the host's `currentKiroKey` and the next draft/execute uses it. Clearing reverts to
+  the startup fallback (legacy `kiro.cred` / env). A getter rather than a swappable port because the
+  credential is a single value the adapter already re-reads each invocation, not a whole port.
 
 **3. Secrets are write-only toward the renderer.** `SettingsView` carries presence
-(`configured: boolean`) and non-secret fields (base URL, email) — never a token. Mutation calls
-return the fresh view so the renderer needn't re-fetch.
+(`configured: boolean`) and non-secret fields (base URL, email, GitHub org) — never a token.
+Mutation calls return the fresh view so the renderer needn't re-fetch.
 
 ## Considered Options
 
@@ -58,12 +67,16 @@ return the fresh view so the renderer needn't re-fetch.
 ## Consequences
 
 - `DugoutApi` gains the settings surface (`getSettings`, `saveWorkspaceRoots`,
-  `saveJiraCredentials`/`clear…`, `saveGitHubToken`/`clear…`), implemented by the Electron host
-  (`settings-controls.ts`) and mirrored in-memory by the local API for tests/e2e.
-- Env vars (`DUGOUT_WORKSPACE_ROOTS`, `DUGOUT_JIRA_*`) remain as stopgap fallbacks when the
-  corresponding setting is empty — dev/CI environments keep working; the UI is the product path.
-- The GitHub token is persisted but not yet consumed (the live GitHub adapter reads env at
-  startup, #10); moving its construction onto the secrets store is the natural follow-up when the
-  adapter needs runtime reconfiguration.
-- The kiro API key (`KiroCredentialStore`) stays separate for now — it predates the keyed store
-  and is owned by onboarding (#18); migrating it into `secrets.enc` is mechanical when #18 lands.
+  `saveJiraCredentials`/`clear…`, `saveGitHubConfig`/`clear…`, `saveKiroApiKey`/`clear…`),
+  implemented by the Electron host (`settings-controls.ts`) and mirrored in-memory by the local API
+  for tests/e2e.
+- Env vars (`DUGOUT_WORKSPACE_ROOTS`, `DUGOUT_JIRA_*`, `DUGOUT_GITHUB_*`, `KIRO_API_KEY`) remain as
+  stopgap fallbacks when the corresponding setting is empty — dev/CI environments keep working; the
+  UI is the product path.
+- **All four settings now propagate live** (workspace roots, Jira, GitHub, kiro) — no setting
+  requires a restart. GitHub org joined `settings.json` as the first non-secret field beyond roots;
+  the token moved onto the secrets store and the adapter is reconfigured at runtime via
+  `SwappableGitHub`.
+- The kiro key now lives in `secrets.enc` (read ahead of the legacy `kiro.cred` and the env
+  stopgap) and is propagated live; the standalone `KiroCredentialStore` remains only as a
+  read-time fallback until onboarding (#18) retires it.

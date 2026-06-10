@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeSettingsControls, SwappableJira, type SettingsApi } from "./settings-controls.js";
+import { makeSettingsControls, SwappableJira, SwappableGitHub, type SettingsApi } from "./settings-controls.js";
 import { SettingsStore } from "./settings-store.js";
 import { SecretsStore } from "./secrets-store.js";
 import type { SafeStorageLike } from "./jira-credentials.js";
 import type { JiraPort, Ticket } from "../core/ports/jira.js";
 import { FakeJira } from "../core/fakes/fake-jira.js";
+import type { GitHubPort, OrgRepo } from "../core/ports/github.js";
+import { FakeGitHub } from "../core/fakes/fake-github.js";
 
 const fakeSafe: SafeStorageLike = {
   isEncryptionAvailable: () => true,
@@ -17,25 +19,38 @@ const fakeSafe: SafeStorageLike = {
 
 const SEED: Ticket = { key: "SEED-1", title: "Seed", description: "" };
 const LIVE: Ticket = { key: "LIVE-1", title: "Live", description: "" };
+const SEED_REPO: OrgRepo = { name: "seed-repo", remote: "git@github.com:seed/seed-repo.git" };
+const LIVE_REPO: OrgRepo = { name: "live-repo", remote: "git@github.com:acme/live-repo.git" };
 
 let dir: string;
 let controls: SettingsApi;
 let jira: SwappableJira;
+let github: SwappableGitHub;
 let appliedRoots: string[][];
+let appliedKiro: (string | null)[];
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "dugout-settingsctl-"));
   const fallback = new FakeJira({ tickets: [SEED] });
   jira = new SwappableJira(fallback);
+  const fallbackGitHub = new FakeGitHub([SEED_REPO]);
+  github = new SwappableGitHub(fallbackGitHub);
   appliedRoots = [];
+  appliedKiro = [];
   controls = makeSettingsControls({
     settingsStore: new SettingsStore(join(dir, "settings.json")),
     secrets: new SecretsStore(join(dir, "secrets.enc"), fakeSafe),
     jira,
     fallbackJira: fallback,
     makeJiraAdapter: () => new FakeJira({ tickets: [LIVE] }) as JiraPort,
+    github,
+    fallbackGitHub,
+    makeGitHubAdapter: () => new FakeGitHub([LIVE_REPO]) as GitHubPort,
     applyWorkspaceRoots: async (roots) => {
       appliedRoots.push(roots);
+    },
+    applyKiroApiKey: (key) => {
+      appliedKiro.push(key);
     },
     encryptionAvailable: () => true,
   });
@@ -72,10 +87,32 @@ describe("settings controls (#17)", () => {
     expect(JSON.stringify(view)).not.toContain("SECRET");
   });
 
-  it("persists a GitHub token through the keyed store (consumption deferred)", async () => {
-    expect((await controls.getSettings()).github.configured).toBe(false);
-    expect((await controls.saveGitHubToken("ghp_x")).github.configured).toBe(true);
-    expect((await controls.clearGitHubToken()).github.configured).toBe(false);
+  it("saving GitHub config swaps the live catalog port to the real adapter; clearing reverts to the fake", async () => {
+    expect((await github.listOrgRepos())[0]!.name).toBe("seed-repo");
+
+    const view = await controls.saveGitHubConfig({ org: "acme", token: "ghp_x" });
+    expect(view.github).toEqual({ org: "acme", configured: true });
+    expect((await github.listOrgRepos())[0]!.name).toBe("live-repo"); // swapped live
+
+    const cleared = await controls.clearGitHubConfig();
+    expect(cleared.github.configured).toBe(false);
+    expect(cleared.github.org).toBe("acme"); // org retained — re-entering the token reconnects
+    expect((await github.listOrgRepos())[0]!.name).toBe("seed-repo"); // reverted
+  });
+
+  it("never sends the GitHub token back to the renderer — only org + presence", async () => {
+    await controls.saveGitHubConfig({ org: "acme", token: "ghp_SECRET" });
+    expect(JSON.stringify(await controls.getSettings())).not.toContain("ghp_SECRET");
+  });
+
+  it("saving the kiro API key applies it to the live executor; clearing reverts to the startup fallback", async () => {
+    expect((await controls.getSettings()).kiro.configured).toBe(false);
+
+    expect((await controls.saveKiroApiKey("kiro_x")).kiro.configured).toBe(true);
+    expect(appliedKiro).toEqual(["kiro_x"]); // reached the live executor, no restart
+
+    expect((await controls.clearKiroApiKey()).kiro.configured).toBe(false);
+    expect(appliedKiro).toEqual(["kiro_x", null]); // reverted live
   });
 
   it("reports encryption availability for the UI's secure-storage notice", async () => {

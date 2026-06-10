@@ -6,7 +6,12 @@
  */
 
 import type { JiraPort } from "../core/ports/jira.js";
-import type { SettingsView } from "../shared/dugout-api.js";
+import type {
+  GitHubPort,
+  PushInput,
+  CreatePullRequestInput,
+} from "../core/ports/github.js";
+import type { GitHubConfigInput, SettingsView } from "../shared/dugout-api.js";
 import type { JiraCredentials } from "./jira-credentials.js";
 import type { SettingsStore } from "./settings-store.js";
 import type { SecretsStore } from "./secrets-store.js";
@@ -36,13 +41,34 @@ export class SwappableJira implements JiraPort {
   }
 }
 
+/** Delegating GitHub port whose backing adapter can be swapped at runtime (settings save/clear). */
+export class SwappableGitHub implements GitHubPort {
+  constructor(private inner: GitHubPort) {}
+
+  swap(inner: GitHubPort): void {
+    this.inner = inner;
+  }
+
+  push(input: PushInput) {
+    return this.inner.push(input);
+  }
+  createPullRequest(input: CreatePullRequestInput) {
+    return this.inner.createPullRequest(input);
+  }
+  listOrgRepos() {
+    return this.inner.listOrgRepos();
+  }
+}
+
 export interface SettingsApi {
   getSettings(): Promise<SettingsView>;
   saveWorkspaceRoots(roots: string[]): Promise<SettingsView>;
   saveJiraCredentials(creds: JiraCredentials): Promise<SettingsView>;
   clearJiraCredentials(): Promise<SettingsView>;
-  saveGitHubToken(token: string): Promise<SettingsView>;
-  clearGitHubToken(): Promise<SettingsView>;
+  saveGitHubConfig(input: GitHubConfigInput): Promise<SettingsView>;
+  clearGitHubConfig(): Promise<SettingsView>;
+  saveKiroApiKey(apiKey: string): Promise<SettingsView>;
+  clearKiroApiKey(): Promise<SettingsView>;
 }
 
 export interface SettingsControlsDeps {
@@ -54,8 +80,16 @@ export interface SettingsControlsDeps {
   fallbackJira: JiraPort;
   /** Build the real API-token adapter from saved credentials. */
   makeJiraAdapter: (creds: JiraCredentials) => JiraPort;
+  /** The live GitHub port the orchestrator + catalog hold. */
+  github: SwappableGitHub;
+  /** The unconfigured fallback (seed catalog fake) the port reverts to when config clears. */
+  fallbackGitHub: GitHubPort;
+  /** Build the real org+token adapter from saved config. */
+  makeGitHubAdapter: (config: GitHubConfigInput) => GitHubPort;
   /** Apply new roots to the live workspace thunk + trigger the rescan/re-bind. */
   applyWorkspaceRoots: (roots: string[]) => Promise<void>;
+  /** Push the kiro key into the live executor's key holder (null reverts to the startup fallback). */
+  applyKiroApiKey: (apiKey: string | null) => void;
   encryptionAvailable: () => boolean;
 }
 
@@ -68,7 +102,8 @@ export function makeSettingsControls(deps: SettingsControlsDeps): SettingsApi {
       workspaceRoots: settings.workspaceRoots,
       // Token itself never crosses to the renderer — only its presence.
       jira: { baseUrl: jira?.baseUrl ?? "", email: jira?.email ?? "", configured: jira !== null },
-      github: { configured: (await deps.secrets.get("github")) !== null },
+      github: { org: settings.githubOrg, configured: (await deps.secrets.get("github")) !== null },
+      kiro: { configured: (await deps.secrets.get("kiro")) !== null },
       encryptionAvailable: deps.encryptionAvailable(),
     };
   };
@@ -96,15 +131,35 @@ export function makeSettingsControls(deps: SettingsControlsDeps): SettingsApi {
       return view();
     },
 
-    async saveGitHubToken(token: string): Promise<SettingsView> {
-      // Persisted now; consumed when the live GitHub adapter reads from the secrets store
-      // (today it is env-configured at startup — see #10's note / out-of-scope in #17).
+    async saveGitHubConfig({ org, token }: GitHubConfigInput): Promise<SettingsView> {
+      // Org (non-secret) → settings.json; token → keyed secrets. Then swap the live catalog/PR
+      // adapter so the org list goes live and PRs open for real, no restart (ADR-0017).
+      const settings = await deps.settingsStore.load();
+      await deps.settingsStore.save({ ...settings, githubOrg: org });
       await deps.secrets.set("github", token);
+      deps.github.swap(deps.makeGitHubAdapter({ org, token }));
       return view();
     },
 
-    async clearGitHubToken(): Promise<SettingsView> {
+    async clearGitHubConfig(): Promise<SettingsView> {
+      // Drop the token and revert to the seed fake; the org stays in settings so re-entering just
+      // the token reconnects.
       await deps.secrets.delete("github");
+      deps.github.swap(deps.fallbackGitHub);
+      return view();
+    },
+
+    async saveKiroApiKey(apiKey: string): Promise<SettingsView> {
+      // Persisted into the keyed store, then pushed into the live executor's key holder so the next
+      // draft/execute uses it with no restart (ADR-0017).
+      await deps.secrets.set("kiro", apiKey);
+      deps.applyKiroApiKey(apiKey);
+      return view();
+    },
+
+    async clearKiroApiKey(): Promise<SettingsView> {
+      await deps.secrets.delete("kiro");
+      deps.applyKiroApiKey(null); // revert to the startup fallback (kiro.cred / env)
       return view();
     },
   };
