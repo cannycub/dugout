@@ -26,6 +26,11 @@ Each spec:
 - Restates the acceptance criteria relevant to that repo as a checklist a reviewer can tick off.
 - Gives a test-first plan: the specific failing tests to write first (name + what each asserts),
   then the implementation outline that makes them pass. Tests prove behaviour, not performance.
+- If the work touches PERFORMANCE-CRITICAL or CONCURRENT code (hot paths, shared mutable state,
+  locking, allocation-sensitive loops), recommend a human code-review stop for it: append
+  " [review-recommended]" to that spec's header (see the output contract) and add a short
+  "Review focus:" line in the spec markdown saying what the reviewer should scrutinise and why.
+  This is a recommendation the developer confirms — when unsure, recommend.
 
 Never guess:
 - Do not invent requirements or assume intent the ticket does not state.
@@ -43,9 +48,10 @@ RESULT: <one of: drafted | needs-clarification | needs-info>
 
 Payload by result:
 - drafted: one section per spec, each introduced by a header line of the exact form
-  "===SPEC <repo name>===" on its own line, followed by that spec's full markdown VERBATIM (do NOT
+  "===SPEC <repo name>===" on its own line — or "===SPEC <repo name> [review-recommended]===" when
+  you recommend a code-review stop for it — followed by that spec's full markdown VERBATIM (do NOT
   escape it — write the markdown as-is). Use only the repository names listed as in scope.
-    ===SPEC web===
+    ===SPEC web [review-recommended]===
     # Spec: ... (the entire spec document, plain markdown)
     ===SPEC infra===
     # Spec: ...

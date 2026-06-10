@@ -91,3 +91,35 @@ describe("draft mode", () => {
     ).rejects.toThrow(/pipeline/);
   });
 });
+
+describe("draftStory — agent review recommendation (#6)", () => {
+  it("carries the agent's reviewRecommended flag into the drafted contract; absent ⇒ false", async () => {
+    const { orchestrator, specStore } = makeHarness({
+      draft: [
+        { repo: "web", markdown: "# Hot path", reviewRecommended: true },
+        { repo: "web", markdown: "# Plain CRUD" },
+      ],
+    });
+
+    const result = await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
+
+    expect(result.outcome === "drafted" && result.story.specs.map((s) => s.reviewRecommended)).toEqual([
+      true,
+      false,
+    ]);
+    // Part of the canonical contract (it informs the approval gate), not run-state.
+    expect(specStore.get("DUG-1")?.specs.map((s) => s.reviewRecommended)).toEqual([true, false]);
+  });
+
+  it("a recommendation alone never forces review-required — the developer's pre-flight does", async () => {
+    const { orchestrator } = makeHarness({
+      draft: [{ repo: "web", markdown: "# Hot path", reviewRecommended: true }],
+    });
+    await orchestrator.draftStory("DUG-1", { repos: ["web"].map(declared) });
+
+    // The developer unchecked the recommendation: approve with no reviewRequired entries.
+    const story = await orchestrator.approveStory("DUG-1", {});
+
+    expect(story.specs[0]?.reviewRequired).toBe(false);
+  });
+});

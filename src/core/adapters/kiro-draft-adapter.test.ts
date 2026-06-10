@@ -87,6 +87,36 @@ describe("KiroDraftAdapter.draft", () => {
     });
   });
 
+  it("parses the [review-recommended] header flag — the agent's perf/concurrency call-out (#6)", async () => {
+    const stdout = [
+      "===DUGOUT BEGIN===",
+      "RESULT: drafted",
+      "===SPEC web [review-recommended]===",
+      "# Spec (web)\nReview focus: lock-free queue on the hot ingest path.",
+      "===SPEC infra===",
+      "# Spec (infra)",
+      "===DUGOUT END===",
+    ].join("\n");
+    const adapter = new KiroDraftAdapter({ workDir, runKiro: async () => stdout });
+
+    const outcome = await adapter.draft({
+      ticket: TICKET,
+      repos: [await declaredClone("web"), await declaredClone("infra")],
+    });
+
+    expect(outcome).toEqual({
+      result: "drafted",
+      specs: [
+        {
+          repo: "web",
+          markdown: "# Spec (web)\nReview focus: lock-free queue on the hot ingest path.",
+          reviewRecommended: true,
+        },
+        { repo: "infra", markdown: "# Spec (infra)" },
+      ],
+    });
+  });
+
   it("ignores kiro's tool-activity narration surrounding the DUGOUT block", async () => {
     // --no-interactive streams the read/grep tool log to stdout; the sentinel block is how we skip it.
     const stdout = [
@@ -225,6 +255,9 @@ describe("KiroDraftAdapter.draft", () => {
     expect(prompt).toContain("needs-clarification");
     expect(prompt).toContain("===DUGOUT BEGIN===");
     expect(prompt).toContain("===DUGOUT END===");
+    // The perf/concurrency review recommendation directive + its header form (#6).
+    expect(prompt).toContain("[review-recommended]");
+    expect(prompt).toMatch(/PERFORMANCE-CRITICAL or CONCURRENT/);
   });
 
   it("rejects stdout with no DUGOUT block, surfacing a snippet for prompt tuning", async () => {

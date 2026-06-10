@@ -32,6 +32,12 @@ export interface DraftedSpec {
   repo: string;
   /** Canonical spec markdown. */
   markdown: string;
+  /**
+   * The agent judges this spec to touch performance-critical or concurrent code and recommends a
+   * `review-required` stop (#6). A recommendation only — the developer confirms (or unchecks) it
+   * at pre-flight; it never forces the flag. The agent explains why in the spec markdown itself.
+   */
+  reviewRecommended?: boolean;
 }
 
 /** One answerable question the agent needs resolved before it can spec without guessing. */
