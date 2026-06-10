@@ -112,6 +112,42 @@ describe("App — ticket selection (D1)", () => {
 });
 
 describe("App — declare repos (D2)", () => {
+  it("shows a loading indicator while the catalog is being searched, then the repos", async () => {
+    // The catalog search is async; until the first one resolves, show progress rather than the
+    // "no repos match" empty-state (which looks like the catalog is empty). Mirrors the roster.
+    const base = createLocalDugoutApi({ tickets: [SEED_TICKET], draft: SEED_DRAFT, repoScope: seedRepoScope() });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let firstSearch = true;
+    const api: DugoutApi = {
+      ...base,
+      searchRepos: (q) => {
+        if (firstSearch) {
+          firstSearch = false;
+          return gate.then(() => base.searchRepos(q));
+        }
+        return base.searchRepos(q);
+      },
+    };
+    render(
+      <DugoutProvider api={api}>
+        <App />
+      </DugoutProvider>,
+    );
+    fireEvent.click(await button(/Stream widget events/));
+
+    // The declare step has mounted but the catalog search is still pending.
+    expect(await screen.findByText(/loading the catalog/i)).toBeTruthy();
+    expect(screen.queryByText(/no repos match/i)).toBeNull();
+
+    // Once it resolves, the catalog appears and the loading indicator is gone.
+    release();
+    expect(await screen.findByText("widget-api")).toBeTruthy();
+    expect(screen.queryByText(/loading the catalog/i)).toBeNull();
+  });
+
   it("filters the catalog, surfaces clone status, and a not-cloned repo is still selectable", async () => {
     // A fan-out that targets the not-cloned repo we declare (ledger), so draft stays valid.
     renderApp({

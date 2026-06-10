@@ -332,11 +332,19 @@ export function DeclareRepos({
   const [results, setResults] = useState<RepoMatch[]>([]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected ?? []));
   const [rescanning, setRescanning] = useState(false);
+  // A catalog search is in flight (initial load or a keystroke filter) — drives the loading
+  // indicator so an empty `results` reads as "still searching" rather than "no matches". The
+  // rescan button has its own `rescanning` flag: it must not fire on every keystroke search.
+  const [searching, setSearching] = useState(true);
 
   useEffect(() => {
     let live = true;
+    setSearching(true);
     void dugout.searchRepos(query).then((r) => {
-      if (live) setResults(r);
+      if (live) {
+        setResults(r);
+        setSearching(false);
+      }
     });
     return () => {
       live = false;
@@ -384,7 +392,11 @@ export function DeclareRepos({
       />
 
       <div className="repo-results">
-        {results.length === 0 ? (
+        {searching && results.length === 0 ? (
+          <div className="running-note">
+            <span className="pulse-dot" /> Loading the catalog…
+          </div>
+        ) : results.length === 0 ? (
           <p className="muted small">No repos match “{query}”.</p>
         ) : (
           results.map((match) => {
