@@ -24,6 +24,7 @@ import { kiroExecuteAgent } from "../core/adapters/kiro-agent-provider.js";
 import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv } from "./jira-credentials.js";
 import { notifyNative } from "./notifications.js";
+import { DatadogMetrics } from "../core/adapters/datadog-metrics.js";
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
 import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
@@ -49,9 +50,19 @@ function broadcast(event: DugoutEvent): void {
 }
 
 /**
- * Metrics sink: a no-op until the real Datadog adapter lands (#13). Metrics must NEVER broadcast to
- * the renderer (#27 de-conflation) — the old MetricsForwarder that did so was a leak, not a feature.
+ * Metrics sink selection (#13): the real Datadog adapter when a `DD_API_KEY` is configured, else a
+ * silent no-op. (The key moves into the extensible secrets store with #17; env is the v1 knob.)
+ * Metrics must NEVER broadcast to the renderer (#27 de-conflation) — emission is for Datadog only,
+ * best-effort, improvement-only.
  */
+function metricsSink(): MetricsPort {
+  const apiKey = process.env["DD_API_KEY"];
+  if (apiKey) {
+    return new DatadogMetrics({ apiKey, ...(process.env["DD_SITE"] ? { site: process.env["DD_SITE"] } : {}) });
+  }
+  return new NoopMetrics();
+}
+
 class NoopMetrics implements MetricsPort {
   emit(_event: MetricEvent): void {
     // Intentionally silent: best-effort port kept warm so instrumentation call sites stay exercised.
@@ -227,7 +238,7 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
     jira,
     executor,
     github,
-    metrics: new NoopMetrics(),
+    metrics: metricsSink(),
     lifecycle: lifecycleBroadcaster,
     envReplay: new FakeEnvReplay(),
     specStore: new InMemorySpecStore(),
