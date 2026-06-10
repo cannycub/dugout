@@ -23,6 +23,22 @@ export type DraftStoryResult =
   | { outcome: "needs-info"; reason: string }
   | { outcome: "needs-clarification"; questions: ClarifyingQuestion[] };
 
+/**
+ * Jira write-back configuration (#11): the event→transition map is per-project (workflow names
+ * differ across Jira projects), so it is injected, not hardcoded. Presence of the config object
+ * enables the projection; every write is best-effort and degrades to a warning (invariant 4/7).
+ */
+export interface JiraWriteBackConfig {
+  transitions?: {
+    /** Applied when drafting lands (the developer picked the ticket up). */
+    pickup?: string;
+    /** Applied when every spec is merged (dev-complete) — e.g. "Ready for QA", never "Done". */
+    devComplete?: string;
+    /** Applied when the agent kicks the ticket back as needs-info. */
+    needsInfo?: string;
+  };
+}
+
 /** The five ports orchestration depends on (CONTEXT.md). Adapters swap; orchestration does not. */
 export interface OrchestratorDeps {
   jira: JiraPort;
@@ -36,6 +52,8 @@ export interface OrchestratorDeps {
    * from `metrics` — lifecycle reaches the renderer, metrics reach Datadog, never each other.
    */
   lifecycle?: LifecyclePort;
+  /** Enables the Jira write-back projection (#11); absent ⇒ no Jira writes at all. */
+  jiraWriteBack?: JiraWriteBackConfig;
   /** Canonical spec content (git); defaults to in-memory. */
   specStore?: SpecStore;
   /** Ephemeral run-state (SQLite); defaults to in-memory. */
@@ -139,6 +157,15 @@ export class Orchestrator {
         // Terminal kickback: the ticket is too thin to spec. Nothing drafted, nothing persisted —
         // the developer enriches the ticket out of band (deeper lifecycle is a follow-up).
         this.emitMetric({ name: "draft.needs_info", tags: { story: ticket.key } });
+        await this.jiraBestEffort("needs-info kickback", async () => {
+          if (!this.deps.jiraWriteBack) return;
+          const needsInfo = this.deps.jiraWriteBack.transitions?.needsInfo;
+          if (needsInfo) await this.deps.jira.transitionTicket(ticket.key, needsInfo);
+          await this.deps.jira.addComment(
+            ticket.key,
+            `Dugout: the drafting agent kicked this ticket back as needs-info — ${outcome.reason}`,
+          );
+        });
         return { outcome: "needs-info", reason: outcome.reason };
 
       case "needs-clarification":
@@ -190,6 +217,10 @@ export class Orchestrator {
           this.emitMetric({ name: "draft.clarification_converged", tags: { story: story.key, rounds } });
         }
         this.emitMetric({ name: "story.drafted", tags: { story: story.key, specs: specs.length } });
+        await this.jiraBestEffort("pickup transition", async () => {
+          const pickup = this.deps.jiraWriteBack?.transitions?.pickup;
+          if (pickup) await this.deps.jira.transitionTicket(story.key, pickup);
+        });
         return { outcome: "drafted", story };
       }
 
@@ -231,7 +262,35 @@ export class Orchestrator {
         replay: story.specs.filter((s) => s.isReplaySpec).length,
       },
     });
+    await this.ensureJiraSubtasks(story);
     return story;
+  }
+
+  /**
+   * Ensure each spec has its ONE Jira subtask (#11), re-entrant and idempotent: a spec whose
+   * contract already carries a subtask key is skipped, so re-entry (restart, repeated sync) never
+   * duplicates. Best-effort per spec — a failed create is skipped (warned) and retried on the next
+   * sync, not fatal.
+   */
+  async syncJiraSubtasks(storyKey: string): Promise<void> {
+    const story = this.requireStory(storyKey);
+    await this.ensureJiraSubtasks(story);
+  }
+
+  private async ensureJiraSubtasks(story: Story): Promise<void> {
+    if (!this.deps.jiraWriteBack) return;
+    let changed = false;
+    for (const spec of story.specs) {
+      if (spec.jiraSubtaskKey) continue;
+      const title = spec.markdown.split("\n", 1)[0]?.replace(/^#\s*/, "") ?? spec.id;
+      await this.jiraBestEffort(`subtask for ${spec.id}`, async () => {
+        const created = await this.deps.jira.createSubtask(story.key, `${spec.id}: ${title}`);
+        spec.jiraSubtaskKey = created.key;
+        changed = true;
+      });
+    }
+    // The subtask key is the idempotency record — canonical, so it survives run-state resets.
+    if (changed) this.persistContent(story);
   }
 
   /**
@@ -404,6 +463,10 @@ export class Orchestrator {
     this.persistRun(story);
     this.emitStory(story.key, "dev-complete");
     this.emitMetric({ name: "story.dev_complete", tags: { story: story.key } });
+    await this.jiraBestEffort("dev-complete transition", async () => {
+      const devComplete = this.deps.jiraWriteBack?.transitions?.devComplete;
+      if (devComplete) await this.deps.jira.transitionTicket(story.key, devComplete);
+    });
     return story;
   }
 
@@ -418,6 +481,16 @@ export class Orchestrator {
     this.persistRun(story);
     this.emitSpec(story.key, spec.id, "merged");
     this.emitMetric({ name: "spec.merged", tags: { story: story.key, repo: spec.repo } });
+    if (spec.jiraSubtaskKey) {
+      const subtaskKey = spec.jiraSubtaskKey;
+      await this.jiraBestEffort(`close subtask ${subtaskKey}`, () =>
+        this.deps.jira.closeSubtask(
+          subtaskKey,
+          `Dugout: ${spec.id} went green and merged into story/${story.key} ` +
+            `(full suite green over baseline, harness-observed; story status: ${story.status}).`,
+        ),
+      );
+    }
   }
 
   /**
@@ -432,6 +505,18 @@ export class Orchestrator {
     this.emitSpec(story.key, spec.id, "failed");
     this.emitStory(story.key, "failed");
     throw err;
+  }
+
+  /**
+   * Run a Jira write best-effort (#11): failures degrade to a warning and never block the build
+   * (invariant 7). Awaitable so call sites stay deterministic, but a rejection cannot escape.
+   */
+  private async jiraBestEffort(label: string, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      console.warn(`[dugout] jira write-back (${label}) failed (non-blocking): ${String(err)}`);
+    }
   }
 
   /** Emit a metric best-effort: a side-effect failure degrades to a warning, never the build. */
@@ -480,6 +565,7 @@ export class Orchestrator {
       reviewRequired: s.reviewRequired,
       reviewRecommended: s.reviewRecommended,
       order: s.order,
+      ...(s.jiraSubtaskKey ? { jiraSubtaskKey: s.jiraSubtaskKey } : {}),
     }));
     const content: StorySpecs = { key: story.key, title: story.title, specs };
     this.specStore.putStory(content);

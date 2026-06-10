@@ -1,4 +1,4 @@
-import { Orchestrator } from "./orchestrator.js";
+import { Orchestrator, type JiraWriteBackConfig } from "./orchestrator.js";
 import { FakeJira } from "./fakes/fake-jira.js";
 import { FakeExecutor } from "./fakes/fake-executor.js";
 import { FakeGitHub } from "./fakes/fake-github.js";
@@ -48,6 +48,8 @@ export interface HarnessOptions {
   store?: RunStateStore;
   /** Spec content store override; defaults to a fresh in-memory store. */
   specStore?: SpecStore;
+  /** Enables the Jira write-back projection (#11). */
+  jiraWriteBack?: JiraWriteBackConfig;
 }
 
 /** Builds an Orchestrator wired to all five fake ports + both stores, exposed for assertions. */
@@ -81,7 +83,19 @@ export function makeHarness(options: HarnessOptions) {
       mergeCalls.push({ repo, storyKey, specId });
     });
   const lifecycle = new FakeLifecycle();
-  const orchestrator = new Orchestrator({ jira, executor, github, metrics, envReplay, lifecycle, store, specStore, resolveBaseBranch, mergeToStoryBranch });
+  const orchestrator = new Orchestrator({
+    jira,
+    executor,
+    github,
+    metrics,
+    envReplay,
+    lifecycle,
+    store,
+    specStore,
+    resolveBaseBranch,
+    mergeToStoryBranch,
+    ...(options.jiraWriteBack ? { jiraWriteBack: options.jiraWriteBack } : {}),
+  });
   return { orchestrator, jira, executor, github, metrics, envReplay, lifecycle, store, specStore, mergeCalls };
 }
 

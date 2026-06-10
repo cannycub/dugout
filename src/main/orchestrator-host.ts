@@ -236,6 +236,25 @@ export async function createOrchestrator(userDataDir: string): Promise<Orchestra
 
   const orchestrator = new Orchestrator({
     jira,
+    // Jira write-back (#11): enabled by the per-project transition map (workflow names differ per
+    // Jira project). Env knobs until the settings UI (#17) owns them; unset ⇒ projection off.
+    ...(process.env["DUGOUT_JIRA_WRITEBACK"]
+      ? {
+          jiraWriteBack: {
+            transitions: {
+              ...(process.env["DUGOUT_JIRA_TRANSITION_PICKUP"]
+                ? { pickup: process.env["DUGOUT_JIRA_TRANSITION_PICKUP"] }
+                : {}),
+              ...(process.env["DUGOUT_JIRA_TRANSITION_DEV_COMPLETE"]
+                ? { devComplete: process.env["DUGOUT_JIRA_TRANSITION_DEV_COMPLETE"] }
+                : {}),
+              ...(process.env["DUGOUT_JIRA_TRANSITION_NEEDS_INFO"]
+                ? { needsInfo: process.env["DUGOUT_JIRA_TRANSITION_NEEDS_INFO"] }
+                : {}),
+            },
+          },
+        }
+      : {}),
     executor,
     github,
     metrics: metricsSink(),
