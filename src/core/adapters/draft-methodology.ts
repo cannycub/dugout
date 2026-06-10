@@ -31,6 +31,10 @@ Each spec:
   " [review-recommended]" to that spec's header (see the output contract) and add a short
   "Review focus:" line in the spec markdown saying what the reviewer should scrutinise and why.
   This is a recommendation the developer confirms — when unsure, recommend.
+- Where performance or concurrency expectations constrain the implementation (latency budgets,
+  ordering guarantees, lock discipline, allocation limits), state them in the spec under a short
+  "Non-functional notes" section — tests prove behaviour, not efficiency, so the reviewer needs
+  these spelled out. Omit the section when none apply.
 
 Never guess:
 - Do not invent requirements or assume intent the ticket does not state.

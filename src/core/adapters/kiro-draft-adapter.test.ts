@@ -258,6 +258,8 @@ describe("KiroDraftAdapter.draft", () => {
     // The perf/concurrency review recommendation directive + its header form (#6).
     expect(prompt).toContain("[review-recommended]");
     expect(prompt).toMatch(/PERFORMANCE-CRITICAL or CONCURRENT/);
+    // Non-functional expectations surface in the spec itself for the reviewer (#12).
+    expect(prompt).toMatch(/Non-functional notes/);
   });
 
   it("rejects stdout with no DUGOUT block, surfacing a snippet for prompt tuning", async () => {
