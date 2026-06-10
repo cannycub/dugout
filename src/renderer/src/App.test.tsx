@@ -56,6 +56,31 @@ describe("App — ticket selection (D1)", () => {
     expect(await screen.findByLabelText(/search the catalog/i)).toBeTruthy();
   });
 
+  it("shows a loading indicator while the roster is being fetched, then the tickets", async () => {
+    // The roster fetch is async; until it resolves the view must say it's loading rather than show
+    // the "nothing assigned" empty-state (which looks like a bug on a slow/initial load).
+    const base = createLocalDugoutApi({ tickets: [SEED_TICKET], draft: SEED_DRAFT, repoScope: seedRepoScope() });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const api: DugoutApi = { ...base, listTickets: () => gate.then(() => [SEED_TICKET]) };
+    render(
+      <DugoutProvider api={api}>
+        <App />
+      </DugoutProvider>,
+    );
+
+    // While the fetch is in flight: the loading indicator, NOT the empty-state.
+    expect(await screen.findByText(/loading your roster/i)).toBeTruthy();
+    expect(screen.queryByText(/nothing to call from the dugout/i)).toBeNull();
+
+    // Once it resolves, the ticket appears and the loading indicator is gone.
+    release();
+    expect(await screen.findByText(/Stream widget events/)).toBeTruthy();
+    expect(screen.queryByText(/loading your roster/i)).toBeNull();
+  });
+
   it("re-fetches the roster when refreshed (a newly-assigned ticket appears)", async () => {
     // The roster loads once on mount; refresh must re-call listTickets so a ticket assigned in Jira
     // mid-session shows up without a restart (mirrors the declare-repos rescan).

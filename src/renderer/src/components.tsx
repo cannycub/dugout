@@ -235,23 +235,15 @@ export function TicketRoster({
   tickets,
   onSelect,
   onRefresh,
+  loading,
 }: {
   tickets: Ticket[];
   onSelect: (key: string) => void;
   /** Re-fetch the assigned tickets (after the dev assigns one in Jira mid-session). */
   onRefresh: () => Promise<unknown>;
+  /** A fetch is in flight (initial load or refresh) — drives the loading indicator + button state. */
+  loading: boolean;
 }) {
-  const [refreshing, setRefreshing] = useState(false);
-
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      await onRefresh();
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   return (
     <div className="field roster-field">
       <div className="field-head">
@@ -260,12 +252,22 @@ export function TicketRoster({
           <span className="field-count">
             {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
           </span>
-          <button type="button" className="rescan-btn" onClick={refresh} disabled={refreshing}>
-            {refreshing ? "refreshing…" : "↻ refresh"}
+          <button
+            type="button"
+            className="rescan-btn"
+            onClick={() => void onRefresh()}
+            disabled={loading}
+          >
+            {loading ? "refreshing…" : "↻ refresh"}
           </button>
         </div>
       </div>
-      {tickets.length === 0 ? (
+      {loading && tickets.length === 0 ? (
+        // Initial load (or a refresh from empty): show progress, not the "nothing assigned" state.
+        <div className="running-note">
+          <span className="pulse-dot" /> Loading your roster…
+        </div>
+      ) : tickets.length === 0 ? (
         <p className="muted">No tickets assigned to you. Nothing to call from the dugout yet.</p>
       ) : (
         <div className="roster">
