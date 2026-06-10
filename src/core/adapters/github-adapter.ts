@@ -4,6 +4,7 @@
  * the developer's own token). Carries the whole GitHubPort:
  *
  * - `listOrgRepos` — the live team catalog (replaces FakeGitHub(SEED_CATALOG) in the running app).
+ *   Works whether the configured owner is an org or a personal account (see resolveRepoListUrl).
  * - `createPullRequest` — one fully-linked PR per repo against the repo's default branch.
  *   Dugout NEVER auto-merges (invariant 5): nothing here can merge.
  * - `push` — delegated to an injected git mechanic: pushing a local story branch is a git
@@ -21,7 +22,7 @@ import type {
 } from "../ports/github.js";
 
 export interface GitHubAdapterConfig {
-  /** The GitHub org whose repos form the team catalog. */
+  /** The GitHub account whose repos form the team catalog — an org OR a personal username. */
   org: string;
   /** The developer's token (fine-grained PAT); lives in the secrets store (#17) / env until then. */
   token: string;
@@ -35,15 +36,37 @@ export class GitHubAdapter implements GitHubPort {
   constructor(private readonly config: GitHubAdapterConfig) {}
 
   async listOrgRepos(): Promise<OrgRepo[]> {
+    const listUrl = await this.resolveRepoListUrl(this.config.org);
+    const sep = listUrl.includes("?") ? "&" : "?";
     const repos: OrgRepo[] = [];
     for (let page = 1; ; page++) {
-      const body = (await this.get(
-        `https://api.github.com/orgs/${this.config.org}/repos?per_page=100&page=${page}`,
-      )) as Array<{ name: string; ssh_url: string }>;
+      const body = (await this.get(`${listUrl}${sep}per_page=100&page=${page}`)) as Array<{
+        name: string;
+        ssh_url: string;
+      }>;
       repos.push(...body.map((r) => ({ name: r.name, remote: r.ssh_url })));
       if (body.length === 0) break; // page past the end ⇒ done (no Link-header parsing needed)
     }
     return repos;
+  }
+
+  /**
+   * The catalog owner can be an org OR a personal account, and `/orgs/{owner}/repos` 404s for a
+   * user (the source of the resync 404 on personal accounts). Resolve the right listing endpoint:
+   * - Organization → `/orgs/{owner}/repos`.
+   * - The token's OWN user account → `/user/repos?affiliation=owner`, so the developer's private
+   *   repos appear (the public `/users/{owner}/repos` would hide them).
+   * - Any other user → public `/users/{owner}/repos`.
+   */
+  private async resolveRepoListUrl(owner: string): Promise<string> {
+    const account = (await this.get(`https://api.github.com/users/${owner}`)) as { type?: string };
+    if (account.type === "Organization") {
+      return `https://api.github.com/orgs/${owner}/repos`;
+    }
+    const me = (await this.get(`https://api.github.com/user`)) as { login?: string };
+    return me.login?.toLowerCase() === owner.toLowerCase()
+      ? `https://api.github.com/user/repos?affiliation=owner`
+      : `https://api.github.com/users/${owner}/repos`;
   }
 
   async push(input: PushInput): Promise<void> {
