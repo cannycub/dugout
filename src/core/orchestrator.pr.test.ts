@@ -30,3 +30,31 @@ describe("PR creation", () => {
     expect(orchestrator.getStory("DUG-1")!.status).toBe("pr-created");
   });
 });
+
+describe("PR body — maximum context for peer reviewers (#10)", () => {
+  it("carries the specs (full markdown incl. AC), their flags and grades, and the test-result basis", async () => {
+    const { orchestrator, github } = makeHarness({
+      draft: [
+        { repo: "web", markdown: "# Spec: add endpoint\n\n## AC\n- [ ] returns 200" },
+        { repo: "web", markdown: "# Spec: stream events" },
+      ],
+    });
+    await orchestrator.draftStory("DUG-1", { repos: ["web"].map((await import("./test-harness.js")).declared) });
+    await orchestrator.approveStory("DUG-1", { replaySpecs: ["DUG-1-spec-2"] });
+    await orchestrator.runStory("DUG-1");
+    await orchestrator.resumeAfterReview("DUG-1");
+    await orchestrator.createPullRequests("DUG-1");
+
+    const body = github.pullRequests[0]!.body;
+    // Story header + per-spec sections with the canonical markdown (the AC mapping lives in it).
+    expect(body).toContain("DUG-1");
+    expect(body).toContain("# Spec: add endpoint");
+    expect(body).toContain("- [ ] returns 200");
+    expect(body).toContain("# Spec: stream events");
+    // Flags + resting status are visible per spec.
+    expect(body).toMatch(/DUG-1-spec-2.*replay spec/);
+    expect(body).toMatch(/merged/);
+    // What "green" meant: full suite over baseline, observed by the harness, not self-reported.
+    expect(body).toMatch(/full local suite|harness-observed/i);
+  });
+});

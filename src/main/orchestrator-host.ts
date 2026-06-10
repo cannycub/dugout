@@ -30,6 +30,8 @@ import type { RunStateStore } from "../core/store/run-state-store.js";
 import type { MetricsPort, MetricEvent } from "../core/ports/metrics.js";
 import type { LifecyclePort, LifecycleEvent } from "../core/ports/lifecycle.js";
 import type { JiraPort } from "../core/ports/jira.js";
+import type { GitHubPort } from "../core/ports/github.js";
+import { GitHubAdapter } from "../core/adapters/github-adapter.js";
 import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
 import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
@@ -149,7 +151,21 @@ function fakeExecuteSeam(fake: FakeExecutor): (input: ExecuteInput) => Promise<E
  * live Jira.
  */
 export async function createOrchestrator(userDataDir: string): Promise<Orchestrator> {
-  const github = new FakeGitHub(SEED_CATALOG);
+  // Live GitHub when the developer's token + org are configured (env until the settings UI #17
+  // owns them): the org catalog goes live (replacing the seed list) and PRs open for real. The
+  // REST API directly — never the `gh` CLI (end users won't have it). Push is a git operation on
+  // the clone's own remote, so it is delegated to GitWorkspace. Unset ⇒ the seed fake.
+  const githubToken = process.env["DUGOUT_GITHUB_TOKEN"] ?? process.env["GITHUB_TOKEN"];
+  const githubOrg = process.env["DUGOUT_GITHUB_ORG"];
+  const github: GitHubPort =
+    githubToken && githubOrg
+      ? new GitHubAdapter({
+          org: githubOrg,
+          token: githubToken,
+          pushBranch: async (repo, branch) =>
+            gitWorkspace.pushBranch(await repoScope.resolveClonePath(repo), branch),
+        })
+      : new FakeGitHub(SEED_CATALOG);
 
   // Live Jira when the developer has saved credentials (ADR-0005); else the env-var stopgap (until
   // the settings UI #17 lands — nothing yet calls save(), so env is the only path to live Jira);
