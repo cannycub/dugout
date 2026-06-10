@@ -64,6 +64,12 @@ export interface SpecContent {
    * before the next spec stacks on it. Finalized at pre-flight (replay specs default on).
    */
   reviewRequired: boolean;
+  /**
+   * The draft agent's call-out that this spec touches performance-critical or concurrent code and
+   * deserves a `review-required` stop (#6). A pre-flight *default* the developer confirms or
+   * unchecks — it never forces {@link reviewRequired} by itself.
+   */
+  reviewRecommended: boolean;
   /** Position in the fixed execution order. */
   order: number;
 }

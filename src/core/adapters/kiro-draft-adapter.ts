@@ -161,6 +161,8 @@ function lastBlock(stdout: string): string | null {
 /**
  * Split a drafted block's body on its `===SPEC <repo>===` headers: each header's label is the repo,
  * the text until the next header (or the block's end) is that spec's markdown, verbatim and trimmed.
+ * An optional `[review-recommended]` suffix on the header is the agent's perf/concurrency
+ * call-out (#6) — a pre-flight default the developer confirms, never a decision.
  */
 function parseSpecs(body: string): DraftedSpec[] {
   const headerRe = /^===SPEC[ \t]+(.+?)[ \t]*===[ \t]*$/gm;
@@ -169,12 +171,14 @@ function parseSpecs(body: string): DraftedSpec[] {
     throw new Error("kiro returned a drafted result with no ===SPEC <repo>=== sections");
   }
   return headers.map((header, i) => {
-    const repo = header[1]!.trim();
+    let label = header[1]!.trim();
+    const reviewRecommended = /\[review-recommended\]$/i.test(label);
+    if (reviewRecommended) label = label.replace(/\s*\[review-recommended\]$/i, "").trim();
     const start = header.index + header[0].length;
     const end = i + 1 < headers.length ? headers[i + 1]!.index : body.length;
     const markdown = body.slice(start, end).trim();
-    if (!markdown) throw new Error(`kiro drafted a spec for "${repo}" with empty markdown`);
-    return { repo, markdown };
+    if (!markdown) throw new Error(`kiro drafted a spec for "${label}" with empty markdown`);
+    return { repo: label, markdown, ...(reviewRecommended ? { reviewRecommended: true } : {}) };
   });
 }
 

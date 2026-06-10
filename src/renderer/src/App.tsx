@@ -135,6 +135,15 @@ export function App() {
   // still the latest selection, so a slow resolve can't clobber a newer pick (out-of-order guard).
   const selectionRef = useRef<string | null>(null);
 
+  // Pre-check the agent's review recommendations when a drafted story enters the view (#6): the
+  // recommended specs arrive with "mark review-required" already on, and the developer confirms by
+  // leaving them checked — or overrules by unchecking. Their choice at approve() is what counts.
+  const seedRecommendations = useCallback((story: Story) => {
+    if (story.status === "drafted") {
+      setReviewSel(new Set(story.specs.filter((s) => s.reviewRecommended).map((s) => s.id)));
+    }
+  }, []);
+
   // Selecting a play loads any existing run-state for it (a parked story re-opens); otherwise the
   // developer starts at declaring repos.
   const onSelect = (key: string) => {
@@ -144,6 +153,7 @@ export function App() {
     void guard(async () => {
       const existing = await dugout.getStory(key);
       if (selectionRef.current !== key) return; // a newer selection superseded this one
+      if (existing) seedRecommendations(existing);
       setView(existing ? { type: "story", story: existing } : { type: "declaring", ticket });
     });
   };
@@ -160,6 +170,7 @@ export function App() {
     rounds: ClarificationRound[],
   ) => {
     if (result.outcome === "drafted") {
+      seedRecommendations(result.story);
       setView({ type: "story", story: result.story });
     } else if (result.outcome === "needs-info") {
       // Terminal to Jira: drop the rounds but keep the declared repos so a retry (after editing the
