@@ -1114,3 +1114,123 @@ body {
   opacity: 0.75;
   margin-left: 6px;
 }
+
+/* ── Settings (#17) ─────────────────────────────────────────────────────────────────────── */
+.settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 18px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.settings-row .declare-search {
+  flex: 1;
+}
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chalk-faint);
+}
+.settings-chip {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--chalk-faint);
+  color: var(--chalk-faint);
+}
+.settings-chip.on {
+  color: var(--turf);
+  border-color: var(--turf);
+  background: rgba(84, 201, 138, 0.1);
+}
+.settings-notice {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--turf);
+  border: 1px solid rgba(84, 201, 138, 0.35);
+  background: rgba(84, 201, 138, 0.08);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.root-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.root-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(238, 244, 236, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.root-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--chalk-dim);
+}
+.root-remove {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: none;
+  border: none;
+  color: var(--clay-soft);
+  cursor: pointer;
+}
+.root-remove:hover {
+  color: var(--clay);
+}
+.settings-gear {
+  margin-left: auto;
+  background: none;
+  border: 1px solid rgba(238, 244, 236, 0.14);
+  border-radius: 6px;
+  color: var(--chalk-dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.settings-gear:hover {
+  color: var(--chalk);
+  border-color: rgba(238, 244, 236, 0.3);
+}
