@@ -1237,3 +1237,90 @@ body {
   color: var(--chalk);
   border-color: rgba(238, 244, 236, 0.3);
 }
+
+/* ── Review bench (#9) ──────────────────────────────────────────────────────────────────── */
+.review-bench {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bench-modes {
+  display: flex;
+  gap: 8px;
+}
+.bench-mode {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid rgba(238, 244, 236, 0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk-dim);
+  cursor: pointer;
+}
+.bench-mode.active {
+  border-color: var(--clay);
+  color: var(--chalk);
+}
+.bench-mode input {
+  position: absolute;
+  opacity: 0;
+}
+.bench-mode-hint {
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--chalk-faint);
+}
+.bench-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(13, 21, 19, 0.6);
+  border: 1px solid rgba(238, 244, 236, 0.12);
+  border-radius: 6px;
+  color: var(--chalk);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px;
+  resize: vertical;
+}
+.bench-input:focus {
+  outline: none;
+  border-color: var(--clay-soft);
+}
+.bench-amend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgba(238, 244, 236, 0.08);
+  padding-top: 10px;
+}
+.bench-amend-open {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.bench-amend-open:hover {
+  text-decoration: underline;
+}
+.bench-amend-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bench-cascade {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+  margin: 0;
+}

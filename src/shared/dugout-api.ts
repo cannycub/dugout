@@ -5,7 +5,7 @@
  */
 
 import type { Story, Preflight, StoryStatus, SpecStatus } from "../core/domain.js";
-import type { DraftStoryResult } from "../core/orchestrator.js";
+import type { DraftStoryResult, ReviewFeedback } from "../core/orchestrator.js";
 import type { Ticket } from "../core/ports/jira.js";
 import type { PullRequest } from "../core/ports/github.js";
 import type { ClarificationRound } from "../core/ports/executor.js";
@@ -50,6 +50,8 @@ export const CHANNELS = {
   resume: "dugout:resume",
   restart: "dugout:restart",
   createPullRequests: "dugout:createPullRequests",
+  submitReviewFeedback: "dugout:submitReviewFeedback",
+  amendSpec: "dugout:amendSpec",
   getSettings: "dugout:getSettings",
   saveWorkspaceRoots: "dugout:saveWorkspaceRoots",
   saveJiraCredentials: "dugout:saveJiraCredentials",
@@ -87,6 +89,10 @@ export interface DugoutApi {
   resume(storyKey: string): Promise<Story>;
   restart(storyKey: string): Promise<Story>;
   createPullRequests(storyKey: string): Promise<PullRequest[]>;
+  /** Code feedback at a review-required stop (#9): green merges in place, the stop continues. */
+  submitReviewFeedback(storyKey: string, feedback: ReviewFeedback): Promise<Story>;
+  /** Amend a wrong spec + re-run clean; returns the flagged downstream cascade (#9). */
+  amendSpec(storyKey: string, specId: string, markdown: string): Promise<{ story: Story; cascade: string[] }>;
   /* Settings (#17). Mutations return the fresh view so the renderer needn't re-fetch. */
   getSettings(): Promise<SettingsView>;
   saveWorkspaceRoots(roots: string[]): Promise<SettingsView>;

@@ -7,6 +7,7 @@ import type { DeclaredRepo } from "../../core/repo-scope.js";
 import type { DraftStoryResult } from "../../core/orchestrator.js";
 import { useDugout } from "./dugout-context.js";
 import { SettingsPanel } from "./settings.js";
+import { ReviewBench } from "./review-bench.js";
 import {
   StatusRibbon,
   StoryPanel,
@@ -239,6 +240,18 @@ export function App() {
     guard(async () => setView({ type: "story", story: await dugout.resume(storyKey) }));
   const onRestart = () =>
     guard(async () => setView({ type: "story", story: await dugout.restart(storyKey) }));
+  const onSubmitFeedback = (kind: "test" | "quality", content: string) =>
+    guard(async () =>
+      setView({ type: "story", story: await dugout.submitReviewFeedback(storyKey, { kind, content }) }),
+    );
+  const onAmendSpec = (specId: string, markdown: string) =>
+    guard(async () => {
+      const { story, cascade } = await dugout.amendSpec(storyKey, specId, markdown);
+      setView({ type: "story", story });
+      if (cascade.length > 0) {
+        setError(null); // informational, not an error — surfaced via the notice path below
+      }
+    });
   const onCreatePRs = () =>
     guard(async () => {
       setPrs(await dugout.createPullRequests(storyKey));
@@ -314,6 +327,14 @@ export function App() {
           </div>
 
           <div className="col col-center">
+            {view.type === "story" && view.story.status === "awaiting-review" && (
+              <ReviewBench
+                story={view.story}
+                busy={busy}
+                onSubmitFeedback={onSubmitFeedback}
+                onAmendSpec={onAmendSpec}
+              />
+            )}
             {view.type === "story" ? (
               <SpecLineup
                 story={view.story}
