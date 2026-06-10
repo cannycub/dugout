@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { Orchestrator } from "../core/orchestrator.js";
+import { Orchestrator, type ReviewFeedback } from "../core/orchestrator.js";
 import type { Preflight } from "../core/domain.js";
 import { CHANNELS } from "../shared/dugout-api.js";
 import type { DeclaredRepo } from "../core/repo-scope.js";
@@ -75,6 +75,14 @@ function registerIpc(orchestrator: Orchestrator): void {
 
   ipcMain.handle(CHANNELS.createPullRequests, (_e, key: string) =>
     orchestrator.createPullRequests(key),
+  );
+
+  ipcMain.handle(CHANNELS.submitReviewFeedback, (_e, key: string, feedback: ReviewFeedback) =>
+    orchestrator.submitReviewFeedback(key, feedback),
+  );
+
+  ipcMain.handle(CHANNELS.amendSpec, (_e, key: string, specId: string, markdown: string) =>
+    orchestrator.amendSpec(key, specId, markdown),
   );
 }
 
