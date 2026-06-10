@@ -33,7 +33,9 @@ describe("JiraReadAdapter.listAssignedTickets", () => {
       { key: "DUG-7", title: "Add timeline", description: "AC: returns 200" },
     ]);
     expect(decodeURIComponent(captured.url!)).toContain("assignee = currentUser()");
-    expect(captured.url).toContain("/rest/api/3/search");
+    // Enhanced JQL search endpoint — the legacy /search was removed (410 Gone) on Jira Cloud.
+    expect(captured.url).toContain("/rest/api/3/search/jql");
+    expect(captured.url).not.toContain("/search?");
     expect(captured.auth).toBe(`Basic ${Buffer.from("dev@acme.com:tok").toString("base64")}`);
   });
 
@@ -63,33 +65,38 @@ describe("JiraReadAdapter.listAssignedTickets", () => {
     expect(tickets[0]!.description).toBe("AC: returns 200\nand logs the request");
   });
 
-  it("pages through all assigned tickets, not just the first page", async () => {
-    const pages: Record<string, { startAt: number; total: number; issues: unknown[] }> = {
-      "0": {
-        startAt: 0,
-        total: 3,
+  it("pages through all assigned tickets via nextPageToken (the new API drops startAt/total)", async () => {
+    // Enhanced JQL search paginates by an opaque token and signals the end with isLast — there is
+    // no startAt offset and no total count to drive a loop off of.
+    const pages: Record<string, { issues: unknown[]; nextPageToken?: string; isLast: boolean }> = {
+      "": {
         issues: [
           { key: "DUG-1", fields: { summary: "one" } },
           { key: "DUG-2", fields: { summary: "two" } },
         ],
+        nextPageToken: "tok-2",
+        isLast: false,
       },
-      "2": { startAt: 2, total: 3, issues: [{ key: "DUG-3", fields: { summary: "three" } }] },
+      "tok-2": { issues: [{ key: "DUG-3", fields: { summary: "three" } }], isLast: true },
     };
-    const seen: string[] = [];
+    const seenTokens: (string | null)[] = [];
     const jira = new JiraReadAdapter({
       baseUrl: "https://acme.atlassian.net",
       email: "d@a.com",
       token: "tok",
       fetch: (async (url: Parameters<typeof fetch>[0]) => {
-        const startAt = new URL(String(url)).searchParams.get("startAt") ?? "0";
-        seen.push(startAt);
-        return { ok: true, status: 200, json: async () => pages[startAt] } as unknown as Response;
+        const u = new URL(String(url));
+        expect(u.pathname).toBe("/rest/api/3/search/jql"); // never the removed endpoint
+        expect(u.searchParams.get("startAt")).toBeNull(); // offset pagination is gone
+        const token = u.searchParams.get("nextPageToken");
+        seenTokens.push(token);
+        return { ok: true, status: 200, json: async () => pages[token ?? ""] } as unknown as Response;
       }) as typeof globalThis.fetch,
     });
 
     const tickets = await jira.listAssignedTickets();
     expect(tickets.map((t) => t.key)).toEqual(["DUG-1", "DUG-2", "DUG-3"]);
-    expect(seen).toEqual(["0", "2"]);
+    expect(seenTokens).toEqual([null, "tok-2"]); // first page sends no token; second uses the returned one
   });
 
   it("throws a useful error on a non-ok response", async () => {

@@ -59,26 +59,34 @@ export class JiraReadAdapter implements JiraPort {
   }
 
   async listAssignedTickets(): Promise<Ticket[]> {
+    // Enhanced JQL search (GET /rest/api/3/search/jql). The legacy /rest/api/{2,3}/search was
+    // removed on Jira Cloud and now returns 410 Gone. The new endpoint drops offset pagination
+    // (startAt/total) for an opaque `nextPageToken`, ending a run when `isLast` is true (the token is
+    // then absent). `fields` must be requested explicitly or the payload balloons to every field.
     const jql = encodeURIComponent("assignee = currentUser() ORDER BY updated DESC");
     const fields = "summary,description";
     const auth = Buffer.from(`${this.config.email}:${this.config.token}`).toString("base64");
     const pageSize = 100;
 
     const issues: JiraIssue[] = [];
-    for (let startAt = 0; ; ) {
-      const url = `${this.config.baseUrl}/rest/api/3/search?jql=${jql}&fields=${fields}&startAt=${startAt}&maxResults=${pageSize}`;
+    let nextPageToken: string | undefined;
+    do {
+      const tokenParam = nextPageToken ? `&nextPageToken=${encodeURIComponent(nextPageToken)}` : "";
+      const url = `${this.config.baseUrl}/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=${pageSize}${tokenParam}`;
       const res = await this.fetchImpl(url, {
         headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
       });
       if (!res.ok) {
         throw new Error(`Jira read failed: ${res.status}`);
       }
-      const body = (await res.json()) as { issues: JiraIssue[]; total?: number };
+      const body = (await res.json()) as {
+        issues: JiraIssue[];
+        nextPageToken?: string;
+        isLast?: boolean;
+      };
       issues.push(...body.issues);
-      startAt += body.issues.length;
-      // Stop when the page is empty (no progress), single-page (no total), or all collected.
-      if (body.issues.length === 0 || body.total === undefined || startAt >= body.total) break;
-    }
+      nextPageToken = body.isLast ? undefined : body.nextPageToken;
+    } while (nextPageToken);
 
     return issues.map((i) => ({
       key: i.key,
