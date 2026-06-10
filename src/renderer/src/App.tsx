@@ -58,6 +58,10 @@ export function App() {
   const [view, setView] = useState<View>({ type: "roster" });
   const [prs, setPrs] = useState<PullRequest[]>([]);
   const [reviewSel, setReviewSel] = useState<Set<string>>(new Set());
+  // The developer's pre-flight replay designations (ADR-0008, #19): collected here, sent through
+  // approve() as Preflight.replaySpecs. Replay specs are review-required by definition, so they
+  // are not duplicated into reviewSel — approveStory derives that default.
+  const [replaySel, setReplaySel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,10 +114,20 @@ export function App() {
     });
   }, []);
 
+  const onToggleReplay = useCallback((id: string) => {
+    setReplaySel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const backToRoster = () => {
     setView({ type: "roster" });
     setPrs([]);
     setReviewSel(new Set());
+    setReplaySel(new Set());
     setError(null);
   };
 
@@ -199,7 +213,13 @@ export function App() {
   const storyKey = view.type === "story" ? view.story.key : "";
   const onApprove = () =>
     guard(async () =>
-      setView({ type: "story", story: await dugout.approve(storyKey, { reviewRequired: [...reviewSel] }) }),
+      setView({
+        type: "story",
+        story: await dugout.approve(storyKey, {
+          reviewRequired: [...reviewSel],
+          replaySpecs: [...replaySel],
+        }),
+      }),
     );
   const onRun = () => guard(async () => setView({ type: "story", story: await dugout.run(storyKey) }));
   const onResume = () =>
@@ -271,7 +291,13 @@ export function App() {
 
           <div className="col col-center">
             {view.type === "story" ? (
-              <SpecLineup story={view.story} reviewSel={reviewSel} onToggleReview={onToggleReview} />
+              <SpecLineup
+                story={view.story}
+                reviewSel={reviewSel}
+                replaySel={replaySel}
+                onToggleReview={onToggleReview}
+                onToggleReplay={onToggleReplay}
+              />
             ) : view.type === "clarifying" ? (
               <AnswerForm
                 questions={view.questions}

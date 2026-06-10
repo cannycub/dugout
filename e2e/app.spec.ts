@@ -42,15 +42,23 @@ test("fake ticket flows select → declare → draft → approve → run → rev
   await win.getByRole("button", { name: /pipeline/ }).click();
   await win.getByRole("button", { name: /declare 2 & draft/i }).click();
 
-  // The developer marks the second spec review-required at pre-flight (the agent no longer
-  // designates replay specs — ADR-0008), so the run stops after the first spec merges.
-  await expect(win.getByText("mark review-required").first()).toBeVisible();
-  await win.getByRole("checkbox").nth(1).click();
+  // The developer designates the second spec a replay spec at pre-flight (#19, ADR-0008): the
+  // badge appears and review-required locks on (replay default), so the run stops after the
+  // second spec merges. No agent involvement in the designation.
+  await expect(win.getByText("designate as replay spec").first()).toBeVisible();
+  await win.getByText("designate as replay spec").nth(1).click();
+  await expect(win.getByText("replay spec", { exact: true })).toBeVisible();
+  await expect(win.getByText("review-required (replay default)")).toBeVisible();
 
   await win.getByRole("button", { name: /approve spec set/i }).click();
+
+  // The designation persisted into the approved contract — the badge survives the re-render
+  // from the canonical story, not the pre-flight selection state.
+  await expect(win.getByText("replay spec", { exact: true })).toBeVisible();
+
   await win.getByRole("button", { name: /run story/i }).click();
 
-  // Stops at the review-required spec; first spec merged.
+  // Stops at the review-required (replay) spec; both specs merged at the stop.
   await expect(win.getByRole("button", { name: /resume after review/i })).toBeVisible();
   await expect(win.getByText("Merged").first()).toBeVisible();
 
