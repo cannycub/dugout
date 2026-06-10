@@ -61,11 +61,33 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the developer's assigned tickets (their roster). Telemetry still flows to the metrics
-  // port / Datadog in the background; it is intentionally not surfaced in the UI.
+  // Load the developer's assigned tickets (their roster). (Datadog metrics flow through their own
+  // port and never reach the renderer — only lifecycle transitions stream here, #27.)
   useEffect(() => {
     void dugout.listTickets().then(setTickets);
   }, [dugout]);
+
+  // Live lifecycle stream (#27): while a run is in flight, patch the held story in place — a `spec`
+  // event re-statuses that spec by id (SpecCard/SpecLineup chips move), a `story` event re-statuses
+  // the story (StatusRibbon advances). The Story returned by run()/resume()/restart() remains the
+  // final authority; these patches only animate the in-between.
+  useEffect(
+    () =>
+      dugout.onEvent((event) => {
+        setView((prev) => {
+          if (prev.type !== "story" || prev.story.key !== event.storyKey) return prev;
+          if (event.kind === "story") {
+            if (prev.story.status === event.status) return prev;
+            return { type: "story", story: { ...prev.story, status: event.status } };
+          }
+          const specs = prev.story.specs.map((s) =>
+            s.id === event.specId ? { ...s, status: event.status } : s,
+          );
+          return { type: "story", story: { ...prev.story, specs } };
+        });
+      }),
+    [dugout],
+  );
 
   const guard = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);

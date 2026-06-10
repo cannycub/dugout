@@ -73,3 +73,37 @@ describe("local DugoutApi — clarification loop", () => {
     expect(executor.draftCalls[1]!.clarifications).toEqual(rounds);
   });
 });
+
+describe("local DugoutApi — lifecycle stream (#27)", () => {
+  it("delivers typed story+spec transitions through onEvent, stamped with `at`; metrics never appear", async () => {
+    const api = createLocalDugoutApi({
+      tickets: [{ key: "DUG-1", title: "Add widget", description: "AC: returns 200" }],
+      draft: { result: "drafted", specs: [{ repo: "widget-api", markdown: "# Spec" }] },
+      repoScope: clonedScope("widget-api"),
+    });
+    const events: import("../../shared/dugout-api.js").DugoutEvent[] = [];
+    const unsubscribe = api.onEvent((e) => events.push(e));
+
+    const repos = await api.declareRepos(["widget-api"]);
+    await api.draft("DUG-1", repos);
+    await api.approve("DUG-1", {});
+    await api.run("DUG-1");
+
+    // The stream is the core's transition sequence, mapped to the wire shape (+at). The `merged`
+    // spec event firing while run() is still in flight is exactly what the live UI patches from.
+    expect(events.map((e) => (e.kind === "spec" ? `spec:${e.specId}:${e.status}` : `story:${e.status}`))).toEqual([
+      "story:drafted",
+      "story:approved",
+      "story:executing",
+      "spec:DUG-1-spec-1:running",
+      "spec:DUG-1-spec-1:green",
+      "spec:DUG-1-spec-1:merged",
+      "story:dev-complete",
+    ]);
+    for (const e of events) expect(e.at).toBeTypeOf("number");
+
+    unsubscribe();
+    await api.createPullRequests("DUG-1");
+    expect(events).toHaveLength(7); // unsubscribed — no pr-created delivery
+  });
+});

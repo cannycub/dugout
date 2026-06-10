@@ -4,6 +4,7 @@ import { assertNever } from "./exhaustive.js";
 import type { JiraPort, Ticket } from "./ports/jira.js";
 import type { GitHubPort, PullRequest } from "./ports/github.js";
 import type { MetricsPort, MetricEvent } from "./ports/metrics.js";
+import type { LifecyclePort, LifecycleEvent } from "./ports/lifecycle.js";
 import type { EnvReplayPort } from "./ports/env-replay.js";
 import type { DeclaredRepo, RepoScope, RepoMatch } from "./repo-scope.js";
 import type { RunStateStore } from "./store/run-state-store.js";
@@ -29,6 +30,12 @@ export interface OrchestratorDeps {
   github: GitHubPort;
   metrics: MetricsPort;
   envReplay: EnvReplayPort;
+  /**
+   * Story/spec transition stream for the UI (#27). Optional and best-effort: absent ⇒ no emissions;
+   * a throwing sink degrades to a warning, never into a transition. Deliberately a separate port
+   * from `metrics` — lifecycle reaches the renderer, metrics reach Datadog, never each other.
+   */
+  lifecycle?: LifecyclePort;
   /** Canonical spec content (git); defaults to in-memory. */
   specStore?: SpecStore;
   /** Ephemeral run-state (SQLite); defaults to in-memory. */
@@ -168,6 +175,7 @@ export class Orchestrator {
         };
         this.persistContent(story);
         this.persistRun(story);
+        this.emitStory(story.key, "drafted");
         return { outcome: "drafted", story };
       }
 
@@ -199,6 +207,7 @@ export class Orchestrator {
     // The approved plan (replay + reviewRequired) is part of the canonical contract — persist it too.
     this.persistContent(story);
     this.persistRun(story);
+    this.emitStory(story.key, "approved");
     return story;
   }
 
@@ -214,6 +223,7 @@ export class Orchestrator {
     }
     story.status = "executing";
     this.persistRun(story);
+    this.emitStory(story.key, "executing");
     return this.advanceFrom(story, 0);
   }
 
@@ -236,6 +246,7 @@ export class Orchestrator {
     const next = story.specs.findIndex((s) => s.status === "approved");
     story.status = "executing";
     this.persistRun(story);
+    this.emitStory(story.key, "executing");
     return this.advanceFrom(story, next === -1 ? story.specs.length : next);
   }
 
@@ -258,6 +269,7 @@ export class Orchestrator {
     }
     story.status = "executing";
     this.persistRun(story);
+    this.emitStory(story.key, "executing");
     return this.advanceFrom(story, failedIndex);
   }
 
@@ -293,6 +305,7 @@ export class Orchestrator {
 
     story.status = "pr-created";
     this.persistRun(story);
+    this.emitStory(story.key, "pr-created");
     this.emitMetric({ name: "story.pr_created", tags: { story: story.key, prs: prs.length } });
     return prs;
   }
@@ -303,6 +316,7 @@ export class Orchestrator {
       const spec = story.specs[i]!;
       spec.status = "running";
       this.persistRun(story);
+      this.emitSpec(story.key, spec.id, "running");
       let outcome;
       try {
         // The orchestrator resolves the seed base (story HEAD if it exists, else repo default) and
@@ -329,9 +343,12 @@ export class Orchestrator {
         spec.status = "failed";
         story.status = "failed";
         this.persistRun(story);
+        this.emitSpec(story.key, spec.id, "failed");
+        this.emitStory(story.key, "failed");
         return story;
       }
       spec.status = "green";
+      this.emitSpec(story.key, spec.id, "green");
       // Merge at green, uniformly (ADR-0014): the spec lands on the story branch the instant it is
       // green, before any stop or dev commit can move story HEAD — so the merge always fast-forwards
       // and review-required becomes a pause AFTER the merge, not a gate on it.
@@ -347,12 +364,14 @@ export class Orchestrator {
         // Pause for the developer's review of the now-integrated spec before the next spec runs.
         story.status = "awaiting-review";
         this.persistRun(story);
+        this.emitStory(story.key, "awaiting-review");
         return story;
       }
     }
 
     story.status = "dev-complete";
     this.persistRun(story);
+    this.emitStory(story.key, "dev-complete");
     return story;
   }
 
@@ -365,6 +384,7 @@ export class Orchestrator {
     await this.deps.mergeToStoryBranch?.(spec.repo, story.key, spec.id);
     spec.status = "merged";
     this.persistRun(story);
+    this.emitSpec(story.key, spec.id, "merged");
     this.emitMetric({ name: "spec.merged", tags: { story: story.key, repo: spec.repo } });
   }
 
@@ -377,6 +397,8 @@ export class Orchestrator {
     spec.status = "failed";
     story.status = "failed";
     this.persistRun(story);
+    this.emitSpec(story.key, spec.id, "failed");
+    this.emitStory(story.key, "failed");
     throw err;
   }
 
@@ -386,6 +408,24 @@ export class Orchestrator {
       this.deps.metrics.emit(event);
     } catch (err) {
       console.warn(`[dugout] metrics emit failed (non-blocking): ${String(err)}`);
+    }
+  }
+
+  /** Emit a story-level transition best-effort (#27): never throws into the state machine. */
+  private emitStory(storyKey: string, status: Story["status"]): void {
+    this.emitLifecycle({ kind: "story", storyKey, status });
+  }
+
+  /** Emit a spec-level transition best-effort (#27): never throws into the state machine. */
+  private emitSpec(storyKey: string, specId: string, status: Spec["status"]): void {
+    this.emitLifecycle({ kind: "spec", storyKey, specId, status });
+  }
+
+  private emitLifecycle(event: LifecycleEvent): void {
+    try {
+      this.deps.lifecycle?.emit(event);
+    } catch (err) {
+      console.warn(`[dugout] lifecycle emit failed (non-blocking): ${String(err)}`);
     }
   }
 

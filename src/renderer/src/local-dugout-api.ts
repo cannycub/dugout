@@ -5,10 +5,11 @@ import { FakeGitHub } from "../../core/fakes/fake-github.js";
 import { FakeEnvReplay } from "../../core/fakes/fake-env-replay.js";
 import type { ExecutorPort } from "../../core/ports/executor.js";
 import type { RepoScope } from "../../core/repo-scope.js";
-import type { Story } from "../../core/domain.js";
+
 import type { Ticket } from "../../core/ports/jira.js";
 import type { DraftOutcome } from "../../core/ports/executor.js";
 import type { MetricsPort, MetricEvent } from "../../core/ports/metrics.js";
+import type { LifecyclePort, LifecycleEvent } from "../../core/ports/lifecycle.js";
 import type { DugoutApi, DugoutEvent } from "../../shared/dugout-api.js";
 
 export interface LocalSeed {
@@ -38,9 +39,16 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
   const listeners = new Set<(event: DugoutEvent) => void>();
   const broadcast = (event: DugoutEvent) => listeners.forEach((l) => l(event));
 
+  // Metrics never reach the renderer (#27 de-conflation): a silent best-effort sink, swapped for
+  // the real Datadog adapter by #13. Lifecycle transitions are what the UI streams.
   const metrics: MetricsPort = {
-    emit(event: MetricEvent) {
-      broadcast({ kind: "metric", name: event.name, tags: event.tags ?? {}, at: Date.now() });
+    emit(_event: MetricEvent) {
+      /* intentionally silent */
+    },
+  };
+  const lifecycle: LifecyclePort = {
+    emit(event: LifecycleEvent) {
+      broadcast({ ...event, at: Date.now() });
     },
   };
 
@@ -54,61 +62,28 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
     executor,
     github: new FakeGitHub(),
     metrics,
+    lifecycle,
     envReplay: new FakeEnvReplay(),
     repoScope: seed.repoScope,
   });
 
-  const afterTransition = (story: Story) =>
-    broadcast({
-      kind: "lifecycle",
-      name: `story.${story.status}`,
-      storyKey: story.key,
-      status: story.status,
-      at: Date.now(),
-    });
-
   return {
     listTickets: () => orchestrator.listAssignedTickets(),
     getStory: async (key) => orchestrator.getStory(key) ?? null,
-    draft: async (key, repos, clarifications) => {
-      const result = await orchestrator.draftStory(key, {
+    draft: (key, repos, clarifications) =>
+      orchestrator.draftStory(key, {
         repos,
         ...(clarifications ? { clarifications } : {}),
-      });
-      // Only a drafted fan-out is a lifecycle transition; the stop outcomes persist nothing.
-      if (result.outcome === "drafted") afterTransition(result.story);
-      return result;
-    },
+      }),
     searchRepos: (query) => orchestrator.searchRepos(query),
     declareRepos: (names) => orchestrator.declareRepos(names),
     rescanRepos: () => orchestrator.rescanRepos(),
     listWorkspaceRoots: () => orchestrator.listWorkspaceRoots(),
-    approve: async (key, preflight) => {
-      const story = await orchestrator.approveStory(key, preflight);
-      afterTransition(story);
-      return story;
-    },
-    run: async (key) => {
-      const story = await orchestrator.runStory(key);
-      afterTransition(story);
-      return story;
-    },
-    resume: async (key) => {
-      const story = await orchestrator.resumeAfterReview(key);
-      afterTransition(story);
-      return story;
-    },
-    restart: async (key) => {
-      const story = await orchestrator.restartStory(key);
-      afterTransition(story);
-      return story;
-    },
-    createPullRequests: async (key) => {
-      const prs = await orchestrator.createPullRequests(key);
-      const story = orchestrator.getStory(key);
-      if (story) afterTransition(story);
-      return prs;
-    },
+    approve: (key, preflight) => orchestrator.approveStory(key, preflight),
+    run: (key) => orchestrator.runStory(key),
+    resume: (key) => orchestrator.resumeAfterReview(key),
+    restart: (key) => orchestrator.restartStory(key),
+    createPullRequests: (key) => orchestrator.createPullRequests(key),
     onEvent: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
