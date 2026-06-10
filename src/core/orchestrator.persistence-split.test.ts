@@ -48,7 +48,16 @@ describe("persistence split (SpecStore vs RunStateStore)", () => {
 });
 
 function spec(id: string, order: number, overrides: Partial<SpecContent> = {}): SpecContent {
-  return { id, repo: "web", markdown: `# ${id}`, isReplaySpec: false, reviewRequired: false, order, ...overrides };
+  return {
+    id,
+    repo: "web",
+    markdown: `# ${id}`,
+    isReplaySpec: false,
+    reviewRequired: false,
+    reviewRecommended: false,
+    order,
+    ...overrides,
+  };
 }
 
 describe("assemble (contract + run-state → Story view)", () => {
