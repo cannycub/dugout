@@ -298,3 +298,31 @@ describe("GitWorkspace.defaultBranch", () => {
     }
   });
 });
+
+describe("GitWorkspace.pushBranch (#10)", () => {
+  it("pushes the local story branch to origin (the single end-of-story push)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dugout-push-"));
+    try {
+      // A bare "remote" + a clone with one commit on a story branch.
+      const bare = join(dir, "remote.git");
+      await run("git", ["init", "-q", "--bare", "-b", "main", bare]);
+      const repo = join(dir, "clone");
+      await mkdir(repo);
+      await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      await run("git", ["-C", repo, "config", "user.email", "a@b.c"], {});
+      await run("git", ["-C", repo, "config", "user.name", "a"], {});
+      await run("git", ["-C", repo, "remote", "add", "origin", bare], {});
+      await writeFile(join(repo, "f.txt"), "x");
+      await run("git", ["-C", repo, "add", "-A"], {});
+      await run("git", ["-C", repo, "commit", "-qm", "init"], {});
+      await run("git", ["-C", repo, "branch", "story/DUG-1"], {});
+
+      await new GitWorkspace({ roots: [] }).pushBranch(repo, "story/DUG-1");
+
+      const remoteBranches = (await run("git", ["-C", bare, "branch", "--format=%(refname:short)"])).stdout;
+      expect(remoteBranches).toContain("story/DUG-1");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
