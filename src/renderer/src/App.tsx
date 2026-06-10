@@ -331,7 +331,7 @@ export function App() {
       <PrBanner prs={prs} />
 
       {view.type === "settings" ? (
-        <main className="stage">
+        <main className="stage-settings">
           <SettingsPanel onBack={backToRoster} />
         </main>
       ) : view.type === "roster" ? (

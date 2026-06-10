@@ -24,9 +24,18 @@ export type DugoutEvent =
 export interface SettingsView {
   workspaceRoots: string[];
   jira: { baseUrl: string; email: string; configured: boolean };
-  github: { configured: boolean };
+  /** Org is non-secret (echoed back); the token's presence is `configured`. */
+  github: { org: string; configured: boolean };
+  /** The build agent's API key (kiro). Propagated live to the executor adapters. */
+  kiro: { configured: boolean };
   /** False on e.g. headless Linux without a keyring: the UI must say secrets can't be stored. */
   encryptionAvailable: boolean;
+}
+
+/** GitHub config as entered in Settings: org (non-secret) + the developer's fine-grained PAT. */
+export interface GitHubConfigInput {
+  org: string;
+  token: string;
 }
 
 /** Jira credentials as entered in Settings (ADR-0005: the developer's own API token). */
@@ -58,8 +67,10 @@ export const CHANNELS = {
   saveWorkspaceRoots: "dugout:saveWorkspaceRoots",
   saveJiraCredentials: "dugout:saveJiraCredentials",
   clearJiraCredentials: "dugout:clearJiraCredentials",
-  saveGitHubToken: "dugout:saveGitHubToken",
-  clearGitHubToken: "dugout:clearGitHubToken",
+  saveGitHubConfig: "dugout:saveGitHubConfig",
+  clearGitHubConfig: "dugout:clearGitHubConfig",
+  saveKiroApiKey: "dugout:saveKiroApiKey",
+  clearKiroApiKey: "dugout:clearKiroApiKey",
   event: "dugout:event",
 } as const;
 
@@ -104,8 +115,10 @@ export interface DugoutApi {
   saveWorkspaceRoots(roots: string[]): Promise<SettingsView>;
   saveJiraCredentials(creds: JiraCredentialsInput): Promise<SettingsView>;
   clearJiraCredentials(): Promise<SettingsView>;
-  saveGitHubToken(token: string): Promise<SettingsView>;
-  clearGitHubToken(): Promise<SettingsView>;
+  saveGitHubConfig(input: GitHubConfigInput): Promise<SettingsView>;
+  clearGitHubConfig(): Promise<SettingsView>;
+  saveKiroApiKey(apiKey: string): Promise<SettingsView>;
+  clearKiroApiKey(): Promise<SettingsView>;
   /** Subscribe to streamed telemetry; returns an unsubscribe function. */
   onEvent(listener: (event: DugoutEvent) => void): () => void;
 }

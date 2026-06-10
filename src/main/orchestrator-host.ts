@@ -25,7 +25,7 @@ import { readRepoConfig, type Toolchain } from "../core/repo-config.js";
 import { JiraCredentialStore, jiraCredentialsFromEnv, type JiraCredentials } from "./jira-credentials.js";
 import { SettingsStore } from "./settings-store.js";
 import { SecretsStore } from "./secrets-store.js";
-import { makeSettingsControls, SwappableJira, type SettingsApi } from "./settings-controls.js";
+import { makeSettingsControls, SwappableJira, SwappableGitHub, type SettingsApi } from "./settings-controls.js";
 import { notifyNative } from "./notifications.js";
 import { DatadogMetrics } from "../core/adapters/datadog-metrics.js";
 import { KiroCredentialStore, kiroApiKeyFromEnv } from "./kiro-credentials.js";
@@ -36,7 +36,7 @@ import type { JiraPort } from "../core/ports/jira.js";
 import type { GitHubPort } from "../core/ports/github.js";
 import { GitHubAdapter } from "../core/adapters/github-adapter.js";
 import type { DraftOutcome, ExecutorPort, ExecuteInput, ExecuteOutcome } from "../core/ports/executor.js";
-import { CHANNELS, type DugoutEvent } from "../shared/dugout-api.js";
+import { CHANNELS, type DugoutEvent, type GitHubConfigInput } from "../shared/dugout-api.js";
 import { SEED_TICKET, SEED_DRAFT, SEED_CATALOG } from "./seed.js";
 
 /** Non-throwing CLI runner for sandbox image resolution (a non-zero exit is a result, not an error). */
@@ -156,27 +156,12 @@ function fakeExecuteSeam(fake: FakeExecutor): (input: ExecuteInput) => Promise<E
 export async function createOrchestrator(
   userDataDir: string,
 ): Promise<{ orchestrator: Orchestrator; settings: SettingsApi }> {
-  // Live GitHub when the developer's token + org are configured (env until the settings UI #17
-  // owns them): the org catalog goes live (replacing the seed list) and PRs open for real. The
-  // REST API directly — never the `gh` CLI (end users won't have it). Push is a git operation on
-  // the clone's own remote, so it is delegated to GitWorkspace. Unset ⇒ the seed fake.
-  const githubToken = process.env["DUGOUT_GITHUB_TOKEN"] ?? process.env["GITHUB_TOKEN"];
-  const githubOrg = process.env["DUGOUT_GITHUB_ORG"];
-  const github: GitHubPort =
-    githubToken && githubOrg
-      ? new GitHubAdapter({
-          org: githubOrg,
-          token: githubToken,
-          pushBranch: async (repo, branch) =>
-            gitWorkspace.pushBranch(await repoScope.resolveClonePath(repo), branch),
-        })
-      : new FakeGitHub(SEED_CATALOG);
-
   // Settings + secrets (#17, ADR-0017): non-secret config in settings.json; secrets in ONE keyed
   // safeStorage blob (legacy single-purpose Jira store folded in once).
   const settingsStore = new SettingsStore(join(userDataDir, "settings.json"));
   const secrets = new SecretsStore(join(userDataDir, "secrets.enc"), safeStorage);
   await secrets.migrateLegacyJira(new JiraCredentialStore(join(userDataDir, "jira.cred"), safeStorage));
+  const loadedSettings = await settingsStore.load();
 
   // Live Jira when the developer has saved credentials (settings UI / migrated store), else the
   // env-var stopgap, else the seed fake. Wrapped swappable so a settings save/clear re-points the
@@ -186,21 +171,42 @@ export async function createOrchestrator(
   const creds = (storedJira ? (JSON.parse(storedJira) as JiraCredentials) : null) ?? jiraCredentialsFromEnv();
   const jira = new SwappableJira(creds ? new JiraReadAdapter(creds) : fallbackJira);
 
+  // Live GitHub when the developer's token + org are configured (settings UI #17; env stopgap):
+  // the org catalog goes live (replacing the seed list) and PRs open for real, via the REST API
+  // directly — never the `gh` CLI (end users won't have it). Push is a git operation on the clone's
+  // own remote, delegated to GitWorkspace. Wrapped swappable so a save/clear re-points the running
+  // orchestrator without a restart (ADR-0017). Org → settings.json, token → secrets; unset ⇒ fake.
+  const makeGitHubAdapter = ({ org, token }: GitHubConfigInput): GitHubPort =>
+    new GitHubAdapter({
+      org,
+      token,
+      pushBranch: async (repo, branch) =>
+        gitWorkspace.pushBranch(await repoScope.resolveClonePath(repo), branch),
+    });
+  const fallbackGitHub: GitHubPort = new FakeGitHub(SEED_CATALOG);
+  const githubToken = (await secrets.get("github")) ?? process.env["DUGOUT_GITHUB_TOKEN"] ?? process.env["GITHUB_TOKEN"];
+  const githubOrg = loadedSettings.githubOrg || process.env["DUGOUT_GITHUB_ORG"] || "";
+  const github = new SwappableGitHub(
+    githubToken && githubOrg ? makeGitHubAdapter({ org: githubOrg, token: githubToken }) : fallbackGitHub,
+  );
+
   // Workspace roots: settings-owned, env stopgap honoured when settings are empty. The thunk keeps
   // them LIVE — saveWorkspaceRoots updates the variable and rescans, no restart (#17).
-  let currentRoots = (await settingsStore.load()).workspaceRoots;
+  let currentRoots = loadedSettings.workspaceRoots;
   if (currentRoots.length === 0) currentRoots = workspaceRoots();
   const gitWorkspace = new GitWorkspace({ roots: () => currentRoots });
   const repoScope = new RepoScope(new GitHubCatalog(github), gitWorkspace);
 
-  // Source the kiro API key from secure storage (onboarding #18) or the env stopgap, ONCE, in the
-  // main process — both kiro adapters take it explicitly rather than reading process.env lazily, so a
-  // GUI-launched app (which doesn't inherit a shell's exports) can still reach kiro. undefined ⇒ the
-  // adapters fall back to their own process.env read and fail loudly if it's absent too.
-  const kiroApiKey =
+  // kiro API key. Precedence: the Settings field ("kiro" in the keyed secrets store) wins; then the
+  // legacy single-file kiro.cred; then the env stopgap. The non-secret fallback is captured so that
+  // clearing the setting reverts live. Held behind `currentKiroKey` and passed to both adapters as a
+  // GETTER — they resolve it per run, so a Settings save reaches in-flight adapters with no restart
+  // (ADR-0017). A GUI-launched app doesn't inherit a shell's exports, hence the explicit sourcing.
+  const kiroFallbackKey =
     (await new KiroCredentialStore(join(userDataDir, "kiro.cred"), safeStorage).load()) ??
     kiroApiKeyFromEnv() ??
     undefined;
+  let currentKiroKey = (await secrets.get("kiro")) ?? kiroFallbackKey;
 
   // Draft executor: real kiro by default; `DUGOUT_EXECUTOR=fakes` selects the in-memory fakes
   // (dev/test seam, ADR-0010). The clarify demo seam also slows the fake draft so the waiting view is
@@ -212,7 +218,7 @@ export async function createOrchestrator(
   });
   const kiro = new KiroDraftAdapter({
     workDir: join(userDataDir, "kiro-work"),
-    runKiro: spawnKiroRunner(kiroApiKey ? { apiKey: kiroApiKey } : {}),
+    runKiro: spawnKiroRunner({ apiKey: () => currentKiroKey }),
   });
   const draftExecutor = process.env["DUGOUT_EXECUTOR"] === "fakes" ? fake : kiro;
 
@@ -254,7 +260,7 @@ export async function createOrchestrator(
     loadConfig: (cwd) => readRepoConfig(cwd, { readFile: (p) => readFile(p, "utf8") }),
     // Re-fork the spec branch clean each run so a restart never resumes a failed attempt (invariant 1).
     clearSpecBranch: (cwd, branch) => gitWorkspace.deleteBranch(cwd, branch),
-    ...(kiroApiKey ? { apiKey: kiroApiKey } : {}),
+    apiKey: () => currentKiroKey,
   });
   const fakeExecute = fakeExecuteSeam(fake);
   const executor: ExecutorPort = {
@@ -322,9 +328,15 @@ export async function createOrchestrator(
     jira,
     fallbackJira,
     makeJiraAdapter: (c) => new JiraReadAdapter(c),
+    github,
+    fallbackGitHub,
+    makeGitHubAdapter,
     applyWorkspaceRoots: async (roots) => {
       currentRoots = roots;
       await repoScope.rescan(); // clone bindings reflect the new roots immediately
+    },
+    applyKiroApiKey: (key) => {
+      currentKiroKey = key ?? kiroFallbackKey; // null ⇒ revert to the startup fallback
     },
     encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
   });

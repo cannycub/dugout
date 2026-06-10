@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { App } from "./App.js";
 import { DugoutProvider } from "./dugout-context.js";
 import { createLocalDugoutApi, type LocalSeed } from "./local-dugout-api.js";
@@ -469,6 +469,11 @@ describe("App — agent review recommendation at pre-flight (#6)", () => {
 });
 
 describe("App — settings surface (#17)", () => {
+  // Each credential section is a `.settings-card` led by a `.panel-eyebrow` heading; scope queries
+  // to one so the now-shared chip/button wording ("connected", "Save & connect") never collides.
+  const card = (label: string) =>
+    within(screen.getByText(label, { selector: ".panel-eyebrow" }).closest("section")!);
+
   it("opens settings, adds a workspace root, and connects Jira (configured chips update)", async () => {
     renderApp();
 
@@ -489,23 +494,30 @@ describe("App — settings surface (#17)", () => {
     });
     fireEvent.change(await screen.findByLabelText(/jira email/i), { target: { value: "d@a.com" } });
     fireEvent.change(await screen.findByLabelText(/jira api token/i), { target: { value: "tok-secret" } });
-    fireEvent.click(await button(/save & connect/i));
+    fireEvent.click(card("Jira").getByRole("button", { name: /save & connect/i }));
 
-    expect(await screen.findByText("connected")).toBeTruthy();
+    expect(await card("Jira").findByText("connected")).toBeTruthy();
     expect((screen.getByLabelText(/jira api token/i) as HTMLInputElement).value).toBe("");
 
     // Clear reverts to not connected.
-    fireEvent.click(await button(/^clear$/i));
-    expect(await screen.findByText("not connected")).toBeTruthy();
+    fireEvent.click(card("Jira").getByRole("button", { name: /^clear$/i }));
+    expect(await card("Jira").findByText("not connected")).toBeTruthy();
   });
 
-  it("saves and clears a GitHub token through the same store", async () => {
+  it("saves and clears GitHub config (org + token), flipping the connected chip live", async () => {
     renderApp();
     fireEvent.click(await button(/settings/i));
 
+    fireEvent.change(await screen.findByLabelText(/github org/i), { target: { value: "acme" } });
     fireEvent.change(await screen.findByLabelText(/github token/i), { target: { value: "ghp_x" } });
-    fireEvent.click(await button(/save token/i));
-    expect(await screen.findByText("token saved")).toBeTruthy();
+    fireEvent.click(card("GitHub").getByRole("button", { name: /save & connect/i }));
+    expect(await card("GitHub").findByText("connected")).toBeTruthy();
+    // Token field clears; org stays for re-entry.
+    expect((screen.getByLabelText(/github token/i) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/github org/i) as HTMLInputElement).value).toBe("acme");
+
+    fireEvent.click(card("GitHub").getByRole("button", { name: /^clear$/i }));
+    expect(await card("GitHub").findByText("not connected")).toBeTruthy();
   });
 });
 

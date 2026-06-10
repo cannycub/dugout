@@ -27,8 +27,10 @@ const api: DugoutApi = {
   saveWorkspaceRoots: (roots) => ipcRenderer.invoke(CHANNELS.saveWorkspaceRoots, roots),
   saveJiraCredentials: (creds) => ipcRenderer.invoke(CHANNELS.saveJiraCredentials, creds),
   clearJiraCredentials: () => ipcRenderer.invoke(CHANNELS.clearJiraCredentials),
-  saveGitHubToken: (token) => ipcRenderer.invoke(CHANNELS.saveGitHubToken, token),
-  clearGitHubToken: () => ipcRenderer.invoke(CHANNELS.clearGitHubToken),
+  saveGitHubConfig: (input) => ipcRenderer.invoke(CHANNELS.saveGitHubConfig, input),
+  clearGitHubConfig: () => ipcRenderer.invoke(CHANNELS.clearGitHubConfig),
+  saveKiroApiKey: (apiKey) => ipcRenderer.invoke(CHANNELS.saveKiroApiKey, apiKey),
+  clearKiroApiKey: () => ipcRenderer.invoke(CHANNELS.clearKiroApiKey),
   onEvent: (listener) => {
     const handler = (_event: IpcRendererEvent, payload: DugoutEvent) => listener(payload);
     ipcRenderer.on(CHANNELS.event, handler);

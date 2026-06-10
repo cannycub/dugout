@@ -9,16 +9,29 @@ type RunProcess = (
   opts: { cwd: string; env: NodeJS.ProcessEnv; maxBuffer: number },
 ) => Promise<{ stdout: string }>;
 
+/**
+ * The kiro API key, or a getter the host updates live (settings save). Resolving at call time —
+ * rather than baking a constant — is what lets a Settings change reach in-flight adapters without a
+ * restart (ADR-0017). A string is treated as a fixed value (back-compat for tests/callers).
+ */
+export type ApiKeySource = string | (() => string | undefined);
+
+/** Resolve an {@link ApiKeySource} to its current value, falling back to the ambient env. */
+export function resolveApiKey(source?: ApiKeySource): string | undefined {
+  const explicit = typeof source === "function" ? source() : source;
+  return explicit ?? process.env["KIRO_API_KEY"];
+}
+
 export interface SpawnKiroOptions {
   /** The kiro CLI binary; found on PATH by default. */
   bin?: string;
   /**
    * The kiro API key for headless auth (kiro.dev/docs/cli/headless). Defaults to
-   * `process.env.KIRO_API_KEY`. An explicit value lets the host source it from secure storage
-   * (e.g. safeStorage) rather than relying on the ambient environment — important when the app is
-   * launched from the GUI, which doesn't inherit a shell's exports.
+   * `process.env.KIRO_API_KEY`. An explicit value (or live getter) lets the host source it from
+   * secure storage rather than the ambient environment — important when the app is launched from
+   * the GUI, which doesn't inherit a shell's exports.
    */
-  apiKey?: string;
+  apiKey?: ApiKeySource;
   /** Injectable process runner (tests pass a fake — no real kiro spawns in tests). */
   run?: RunProcess;
 }
@@ -40,7 +53,7 @@ export function spawnKiroRunner(opts: SpawnKiroOptions = {}): KiroRun {
   const bin = opts.bin ?? "kiro-cli";
   const run: RunProcess = opts.run ?? (promisify(execFile) as unknown as RunProcess);
   return async ({ prompt, sourceDir, trustTools }: KiroInvocation) => {
-    const apiKey = opts.apiKey ?? process.env["KIRO_API_KEY"];
+    const apiKey = resolveApiKey(opts.apiKey);
     if (!apiKey) {
       throw new Error(
         "kiro headless needs an API key — set KIRO_API_KEY (kiro.dev/docs/cli/headless).",

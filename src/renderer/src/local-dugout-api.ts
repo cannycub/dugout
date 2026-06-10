@@ -69,10 +69,18 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
 
   // In-memory settings state (#17): same DugoutApi surface as the Electron host, no persistence —
   // the e2e/App tests drive the settings UI against this; the real stores are main-process glue.
-  const settingsState: { roots: string[]; jira: JiraCredentialsInput | null; github: string | null } = {
+  const settingsState: {
+    roots: string[];
+    jira: JiraCredentialsInput | null;
+    githubOrg: string;
+    githubToken: string | null;
+    kiro: string | null;
+  } = {
     roots: [],
     jira: null,
-    github: null,
+    githubOrg: "",
+    githubToken: null,
+    kiro: null,
   };
   const settingsView = async (): Promise<SettingsView> => ({
     workspaceRoots: settingsState.roots,
@@ -81,7 +89,8 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
       email: settingsState.jira?.email ?? "",
       configured: settingsState.jira !== null,
     },
-    github: { configured: settingsState.github !== null },
+    github: { org: settingsState.githubOrg, configured: settingsState.githubToken !== null },
+    kiro: { configured: settingsState.kiro !== null },
     encryptionAvailable: true,
   });
 
@@ -120,12 +129,21 @@ export function createLocalDugoutApi(seed: LocalSeed): DugoutApi {
       settingsState.jira = null;
       return settingsView();
     },
-    saveGitHubToken: async (token) => {
-      settingsState.github = token;
+    saveGitHubConfig: async ({ org, token }) => {
+      settingsState.githubOrg = org;
+      settingsState.githubToken = token;
       return settingsView();
     },
-    clearGitHubToken: async () => {
-      settingsState.github = null;
+    clearGitHubConfig: async () => {
+      settingsState.githubToken = null; // org retained, mirroring the host
+      return settingsView();
+    },
+    saveKiroApiKey: async (apiKey) => {
+      settingsState.kiro = apiKey;
+      return settingsView();
+    },
+    clearKiroApiKey: async () => {
+      settingsState.kiro = null;
       return settingsView();
     },
     onEvent: (listener) => {

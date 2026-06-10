@@ -12,7 +12,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const [view, setView] = useState<SettingsView | null>(null);
   const [rootDraft, setRootDraft] = useState("");
   const [jiraDraft, setJiraDraft] = useState({ baseUrl: "", email: "", token: "" });
-  const [githubDraft, setGithubDraft] = useState("");
+  const [githubDraft, setGithubDraft] = useState({ org: "", token: "" });
+  const [kiroDraft, setKiroDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,6 +21,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     void dugout.getSettings().then((v) => {
       setView(v);
       setJiraDraft({ baseUrl: v.jira.baseUrl, email: v.jira.email, token: "" });
+      setGithubDraft({ org: v.github.org, token: "" });
     });
   }, [dugout]);
 
@@ -71,7 +73,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       {notice && <div className="settings-notice">{notice}</div>}
       {error && <div className="error-bar">⚠ {error}</div>}
 
-      <section className="field settings-section">
+      <section className="settings-card">
         <div className="field-head">
           <span className="panel-eyebrow">Workspace roots</span>
           <span className="field-count">{view.workspaceRoots.length}</span>
@@ -108,7 +110,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
-      <section className="field settings-section">
+      <div className="settings-credentials">
+      <section className="settings-card">
         <div className="field-head">
           <span className="panel-eyebrow">Jira</span>
           <span className={`settings-chip ${view.jira.configured ? "on" : ""}`}>
@@ -176,49 +179,113 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
-      <section className="field settings-section">
+      <div className="settings-col">
+      <section className="settings-card">
         <div className="field-head">
           <span className="panel-eyebrow">GitHub</span>
           <span className={`settings-chip ${view.github.configured ? "on" : ""}`}>
-            {view.github.configured ? "token saved" : "no token"}
+            {view.github.configured ? "connected" : "not connected"}
           </span>
         </div>
         <p className="muted small">
-          Stored now in the same encrypted store; used by the live org catalog and PR creation as
-          those adapters move off env configuration.
+          Org + your fine-grained PAT. Saving takes the live org catalog and PR creation live
+          immediately — no restart.
         </p>
+        <div className="settings-grid">
+          <label>
+            org
+            <input
+              className="declare-search"
+              type="text"
+              placeholder="acme-inc"
+              aria-label="GitHub org"
+              value={githubDraft.org}
+              onChange={(e) => setGithubDraft({ ...githubDraft, org: e.target.value })}
+            />
+          </label>
+          <label>
+            token
+            <input
+              className="declare-search"
+              type="password"
+              placeholder={view.github.configured ? "saved — enter to replace" : "fine-grained personal access token"}
+              aria-label="GitHub token"
+              value={githubDraft.token}
+              onChange={(e) => setGithubDraft({ ...githubDraft, token: e.target.value })}
+            />
+          </label>
+        </div>
         <div className="settings-row">
-          <input
-            className="declare-search"
-            type="password"
-            placeholder={view.github.configured ? "saved — enter to replace" : "fine-grained personal access token"}
-            aria-label="GitHub token"
-            value={githubDraft}
-            onChange={(e) => setGithubDraft(e.target.value)}
-          />
           <button
             type="button"
             className="call-btn turf"
-            disabled={!view.encryptionAvailable || !githubDraft}
+            disabled={!view.encryptionAvailable || !githubDraft.org.trim() || !githubDraft.token}
             onClick={() =>
-              apply(() => dugout.saveGitHubToken(githubDraft), "GitHub token saved.").then(() =>
-                setGithubDraft(""),
-              )
+              apply(
+                () => dugout.saveGitHubConfig({ org: githubDraft.org.trim(), token: githubDraft.token }),
+                "GitHub connected — live, no restart needed.",
+              ).then(() => setGithubDraft((d) => ({ ...d, token: "" })))
             }
           >
-            Save token
+            Save & connect
           </button>
           {view.github.configured && (
             <button
               type="button"
               className="call-btn"
-              onClick={() => apply(() => dugout.clearGitHubToken(), "GitHub token cleared.")}
+              onClick={() => apply(() => dugout.clearGitHubConfig(), "GitHub disconnected.")}
             >
               Clear
             </button>
           )}
         </div>
       </section>
+
+      <section className="settings-card">
+        <div className="field-head">
+          <span className="panel-eyebrow">Kiro</span>
+          <span className={`settings-chip ${view.kiro.configured ? "on" : ""}`}>
+            {view.kiro.configured ? "key saved" : "no key"}
+          </span>
+        </div>
+        <p className="muted small">
+          API key for the build agent that drafts and executes specs. Stored encrypted; the next
+          draft/execute uses it — no restart.
+        </p>
+        <div className="settings-row">
+          <input
+            className="declare-search"
+            type="password"
+            placeholder={view.kiro.configured ? "saved — enter to replace" : "paste your kiro API key"}
+            aria-label="Kiro API key"
+            value={kiroDraft}
+            onChange={(e) => setKiroDraft(e.target.value)}
+          />
+          <button
+            type="button"
+            className="call-btn turf"
+            disabled={!view.encryptionAvailable || !kiroDraft}
+            onClick={() =>
+              apply(() => dugout.saveKiroApiKey(kiroDraft), "Kiro API key saved — live, no restart.").then(
+                () => setKiroDraft(""),
+              )
+            }
+          >
+            Save key
+          </button>
+          {view.kiro.configured && (
+            <button
+              type="button"
+              className="call-btn"
+              onClick={() => apply(() => dugout.clearKiroApiKey(), "Kiro API key cleared.")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </section>
+      </div>
+      </div>
     </div>
   );
 }

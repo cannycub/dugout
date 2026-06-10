@@ -6,7 +6,7 @@ import { reportParserFor } from "../report-parser.js";
 import type { RepoConfig, Toolchain } from "../repo-config.js";
 import { commandRunnerAgent } from "./command-runner-agent.js";
 import { executeMethodology, AMBIGUITY_TAG, COMPLETION_TAG } from "./execute-methodology.js";
-import { stripAnsi } from "./kiro-runner.js";
+import { stripAnsi, resolveApiKey, type ApiKeySource } from "./kiro-runner.js";
 
 /** Idle window for the command-runner suite runs. A cold `npm install`/`dotnet restore` or a slow,
  *  buffered compile can be silent past Sand Castle's 600s default and would otherwise throw. */
@@ -52,8 +52,8 @@ export interface KiroExecuteDeps {
    * than restart clean (invariant 1; ADR-0013).
    */
   clearSpecBranch: (cwd: string, branch: string) => Promise<void>;
-  /** kiro api key source; defaults to process.env.KIRO_API_KEY. */
-  apiKey?: string;
+  /** kiro api key source (value or live getter); defaults to process.env.KIRO_API_KEY. */
+  apiKey?: ApiKeySource;
 }
 
 /** All `<tag>…</tag>` bodies in `stdout`, in order, with the index they appear at. */
@@ -91,7 +91,7 @@ export class KiroExecuteAdapter {
   constructor(private readonly deps: KiroExecuteDeps) {}
 
   async execute(input: ExecuteInput): Promise<ExecuteOutcome> {
-    const apiKey = this.deps.apiKey ?? process.env["KIRO_API_KEY"];
+    const apiKey = resolveApiKey(this.deps.apiKey);
     if (!apiKey) {
       throw new Error("execute mode needs KIRO_API_KEY (kiro.dev/docs/cli/headless).");
     }

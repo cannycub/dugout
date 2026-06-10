@@ -1116,24 +1116,54 @@ body {
 }
 
 /* ── Settings (#17) ─────────────────────────────────────────────────────────────────────── */
+/* Own stage: the story layout's 340/1fr grid stranded settings in the left column with a dead
+   right half. Here the whole panel scrolls as ONE unit (no per-section .field overflow) and the
+   content is a centred column whose credential cards tile two-wide to use the horizontal space. */
+.stage-settings {
+  min-height: 0;
+  overflow-y: auto;
+}
 .settings {
-  max-width: 720px;
+  width: 100%;
+  max-width: 880px;
   margin: 0 auto;
-  padding: 18px 24px 48px;
+  padding: 2px 2px 28px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
+  gap: 14px;
 }
 .settings-head {
   display: flex;
   align-items: center;
   gap: 14px;
 }
-.settings-section {
+/* Content-height card — the .field visual treatment WITHOUT its flex:1 / overflow:auto. */
+.settings-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(160deg, rgba(24, 40, 36, 0.6), rgba(13, 21, 19, 0.6));
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* Jira on the left; GitHub + Kiro stacked on the right. Collapses to one column when narrow. */
+.settings-credentials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (max-width: 760px) {
+  .settings-credentials {
+    grid-template-columns: 1fr;
+  }
 }
 .settings-row {
   display: flex;

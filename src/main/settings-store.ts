@@ -8,9 +8,11 @@ import { readFile, writeFile } from "node:fs/promises";
 export interface DugoutSettings {
   /** Directories scanned (one level deep) for git clones — replaces DUGOUT_WORKSPACE_ROOTS. */
   workspaceRoots: string[];
+  /** GitHub org for the live catalog/PR adapter (non-secret) — replaces DUGOUT_GITHUB_ORG. */
+  githubOrg: string;
 }
 
-const DEFAULTS: DugoutSettings = { workspaceRoots: [] };
+const DEFAULTS: DugoutSettings = { workspaceRoots: [], githubOrg: "" };
 
 export class SettingsStore {
   constructor(private readonly file: string) {}
@@ -19,7 +21,10 @@ export class SettingsStore {
   async load(): Promise<DugoutSettings> {
     try {
       const raw = JSON.parse(await readFile(this.file, "utf8")) as Partial<DugoutSettings>;
-      return { workspaceRoots: Array.isArray(raw.workspaceRoots) ? raw.workspaceRoots : [] };
+      return {
+        workspaceRoots: Array.isArray(raw.workspaceRoots) ? raw.workspaceRoots : [],
+        githubOrg: typeof raw.githubOrg === "string" ? raw.githubOrg : "",
+      };
     } catch {
       return { ...DEFAULTS };
     }

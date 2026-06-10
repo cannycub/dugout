@@ -21,22 +21,23 @@ afterEach(async () => {
 });
 
 describe("SettingsStore (non-secret config → settings.json, #17)", () => {
-  it("round-trips workspace roots and persists them on disk as plain JSON", async () => {
+  it("round-trips workspace roots + GitHub org and persists them on disk as plain JSON", async () => {
     const store = new SettingsStore(join(dir, "settings.json"));
-    expect((await store.load()).workspaceRoots).toEqual([]);
+    expect(await store.load()).toEqual({ workspaceRoots: [], githubOrg: "" });
 
-    await store.save({ workspaceRoots: ["/ws/a", "/ws/b"] });
+    await store.save({ workspaceRoots: ["/ws/a", "/ws/b"], githubOrg: "acme" });
 
-    expect((await store.load()).workspaceRoots).toEqual(["/ws/a", "/ws/b"]);
+    expect(await store.load()).toEqual({ workspaceRoots: ["/ws/a", "/ws/b"], githubOrg: "acme" });
     expect(JSON.parse(await readFile(join(dir, "settings.json"), "utf8"))).toEqual({
       workspaceRoots: ["/ws/a", "/ws/b"],
+      githubOrg: "acme",
     });
   });
 
   it("degrades a corrupt file to defaults (never crashes startup)", async () => {
     await writeFile(join(dir, "settings.json"), "{not json");
     const store = new SettingsStore(join(dir, "settings.json"));
-    expect((await store.load()).workspaceRoots).toEqual([]);
+    expect(await store.load()).toEqual({ workspaceRoots: [], githubOrg: "" });
   });
 });
 

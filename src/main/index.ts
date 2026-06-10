@@ -8,7 +8,7 @@ import type { DeclaredRepo } from "../core/repo-scope.js";
 import type { ClarificationRound } from "../core/ports/executor.js";
 import { createOrchestrator } from "./orchestrator-host.js";
 import type { SettingsApi } from "./settings-controls.js";
-import type { JiraCredentialsInput } from "../shared/dugout-api.js";
+import type { JiraCredentialsInput, GitHubConfigInput } from "../shared/dugout-api.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -102,8 +102,10 @@ function registerSettingsIpc(settings: SettingsApi): void {
     settings.saveJiraCredentials(creds),
   );
   ipcMain.handle(CHANNELS.clearJiraCredentials, () => settings.clearJiraCredentials());
-  ipcMain.handle(CHANNELS.saveGitHubToken, (_e, token: string) => settings.saveGitHubToken(token));
-  ipcMain.handle(CHANNELS.clearGitHubToken, () => settings.clearGitHubToken());
+  ipcMain.handle(CHANNELS.saveGitHubConfig, (_e, input: GitHubConfigInput) => settings.saveGitHubConfig(input));
+  ipcMain.handle(CHANNELS.clearGitHubConfig, () => settings.clearGitHubConfig());
+  ipcMain.handle(CHANNELS.saveKiroApiKey, (_e, apiKey: string) => settings.saveKiroApiKey(apiKey));
+  ipcMain.handle(CHANNELS.clearKiroApiKey, () => settings.clearKiroApiKey());
 }
 
 app.whenReady().then(async () => {
