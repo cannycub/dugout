@@ -336,7 +336,11 @@ export function App() {
         </main>
       ) : view.type === "roster" ? (
         <main className="stage stage-roster">
-          <TicketRoster tickets={tickets} onSelect={onSelect} />
+          <TicketRoster
+            tickets={tickets}
+            onSelect={onSelect}
+            onRefresh={() => dugout.listTickets().then(setTickets)}
+          />
         </main>
       ) : (
         <main className="stage">

@@ -55,6 +55,35 @@ describe("App — ticket selection (D1)", () => {
     fireEvent.click(await button(/Backfill ledger totals/));
     expect(await screen.findByLabelText(/search the catalog/i)).toBeTruthy();
   });
+
+  it("re-fetches the roster when refreshed (a newly-assigned ticket appears)", async () => {
+    // The roster loads once on mount; refresh must re-call listTickets so a ticket assigned in Jira
+    // mid-session shows up without a restart (mirrors the declare-repos rescan).
+    const base = createLocalDugoutApi({
+      tickets: [SEED_TICKET],
+      draft: SEED_DRAFT,
+      repoScope: seedRepoScope(),
+    });
+    const newlyAssigned: Ticket = { key: "DUG-9", title: "Backfill ledger totals", description: "AC: sums" };
+    let calls = 0;
+    const api: DugoutApi = {
+      ...base,
+      listTickets: async () => (++calls === 1 ? [SEED_TICKET] : [SEED_TICKET, newlyAssigned]),
+    };
+    render(
+      <DugoutProvider api={api}>
+        <App />
+      </DugoutProvider>,
+    );
+
+    // First load shows only the seed ticket.
+    expect(await screen.findByText(/Stream widget events/)).toBeTruthy();
+    expect(screen.queryByText("Backfill ledger totals")).toBeNull();
+
+    // Refreshing re-fetches and surfaces the ticket assigned since mount.
+    fireEvent.click(await button(/refresh/i));
+    expect(await screen.findByText("Backfill ledger totals")).toBeTruthy();
+  });
 });
 
 describe("App — declare repos (D2)", () => {

@@ -234,17 +234,36 @@ function SpecCard({ spec, index, editable, reviewSelected, replaySelected, onTog
 export function TicketRoster({
   tickets,
   onSelect,
+  onRefresh,
 }: {
   tickets: Ticket[];
   onSelect: (key: string) => void;
+  /** Re-fetch the assigned tickets (after the dev assigns one in Jira mid-session). */
+  onRefresh: () => Promise<unknown>;
 }) {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className="field roster-field">
       <div className="field-head">
         <span className="panel-eyebrow">Today's roster</span>
-        <span className="field-count">
-          {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
-        </span>
+        <div className="roster-actions">
+          <span className="field-count">
+            {tickets.length} {tickets.length === 1 ? "play" : "plays"} assigned
+          </span>
+          <button type="button" className="rescan-btn" onClick={refresh} disabled={refreshing}>
+            {refreshing ? "refreshing…" : "↻ refresh"}
+          </button>
+        </div>
       </div>
       {tickets.length === 0 ? (
         <p className="muted">No tickets assigned to you. Nothing to call from the dugout yet.</p>
