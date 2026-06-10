@@ -9,6 +9,10 @@ export interface JiraReadConfig {
   token: string;
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: typeof globalThis.fetch;
+  /** Subtask issue-type name for createSubtask (instance-dependent); default "Subtask". */
+  subtaskIssueType?: string;
+  /** Transition name that closes a subtask; default "Done". */
+  subtaskDoneTransition?: string;
 }
 
 /** A node in Atlassian Document Format: `text` leaves carry content; others nest `content`. */
@@ -81,5 +85,79 @@ export class JiraReadAdapter implements JiraPort {
       title: i.fields.summary,
       description: descriptionToText(i.fields.description),
     }));
+  }
+
+  /* ── Write-back (#11): every write rides the developer's own token (their identity). ──────── */
+
+  /** Move an issue through a workflow transition by NAME (ids are per-project; names are config). */
+  async transitionTicket(issueKey: string, transition: string): Promise<void> {
+    const url = `${this.config.baseUrl}/rest/api/3/issue/${issueKey}/transitions`;
+    const res = await this.fetchImpl(url, { headers: this.headers() });
+    if (!res.ok) throw new Error(`Jira transitions lookup failed for ${issueKey}: ${res.status}`);
+    const body = (await res.json()) as { transitions: Array<{ id: string; name: string }> };
+    const match = body.transitions.find((t) => t.name.toLowerCase() === transition.toLowerCase());
+    if (!match) {
+      throw new Error(
+        `Jira transition "${transition}" not available on ${issueKey} ` +
+          `(have: ${body.transitions.map((t) => t.name).join(", ") || "none"})`,
+      );
+    }
+    const post = await this.fetchImpl(url, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({ transition: { id: match.id } }),
+    });
+    if (!post.ok) throw new Error(`Jira transition POST failed for ${issueKey}: ${post.status}`);
+  }
+
+  /** Create a subtask under the ticket. The caller owns idempotency (one per spec, key persisted). */
+  async createSubtask(parentKey: string, summary: string): Promise<{ key: string }> {
+    const projectKey = parentKey.split("-")[0]!;
+    const res = await this.fetchImpl(`${this.config.baseUrl}/rest/api/3/issue`, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({
+        fields: {
+          project: { key: projectKey },
+          parent: { key: parentKey },
+          summary,
+          issuetype: { name: this.config.subtaskIssueType ?? "Subtask" },
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(`Jira subtask create failed under ${parentKey}: ${res.status}`);
+    const body = (await res.json()) as { key: string };
+    return { key: body.key };
+  }
+
+  /** Comment on an issue (v3 wants an ADF body). */
+  async addComment(issueKey: string, text: string): Promise<void> {
+    const res = await this.fetchImpl(`${this.config.baseUrl}/rest/api/3/issue/${issueKey}/comment`, {
+      method: "POST",
+      headers: this.headers(true),
+      body: JSON.stringify({
+        body: {
+          type: "doc",
+          version: 1,
+          content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(`Jira comment failed on ${issueKey}: ${res.status}`);
+  }
+
+  /** Close a subtask: completion comment first, then the closing transition. */
+  async closeSubtask(subtaskKey: string, comment: string): Promise<void> {
+    await this.addComment(subtaskKey, comment);
+    await this.transitionTicket(subtaskKey, this.config.subtaskDoneTransition ?? "Done");
+  }
+
+  private headers(json = false): Record<string, string> {
+    const auth = Buffer.from(`${this.config.email}:${this.config.token}`).toString("base64");
+    return {
+      Authorization: `Basic ${auth}`,
+      Accept: "application/json",
+      ...(json ? { "Content-Type": "application/json" } : {}),
+    };
   }
 }
