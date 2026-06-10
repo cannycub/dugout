@@ -20,6 +20,22 @@ export type DugoutEvent =
   | { kind: "story"; storyKey: string; status: StoryStatus; at: number }
   | { kind: "spec"; storyKey: string; specId: string; status: SpecStatus; at: number };
 
+/** What the Settings view reads (#17). Secrets never cross — only their presence. */
+export interface SettingsView {
+  workspaceRoots: string[];
+  jira: { baseUrl: string; email: string; configured: boolean };
+  github: { configured: boolean };
+  /** False on e.g. headless Linux without a keyring: the UI must say secrets can't be stored. */
+  encryptionAvailable: boolean;
+}
+
+/** Jira credentials as entered in Settings (ADR-0005: the developer's own API token). */
+export interface JiraCredentialsInput {
+  baseUrl: string;
+  email: string;
+  token: string;
+}
+
 /** Stable IPC channel names, shared by preload and main so they can't drift. */
 export const CHANNELS = {
   listTickets: "dugout:listTickets",
@@ -34,6 +50,12 @@ export const CHANNELS = {
   resume: "dugout:resume",
   restart: "dugout:restart",
   createPullRequests: "dugout:createPullRequests",
+  getSettings: "dugout:getSettings",
+  saveWorkspaceRoots: "dugout:saveWorkspaceRoots",
+  saveJiraCredentials: "dugout:saveJiraCredentials",
+  clearJiraCredentials: "dugout:clearJiraCredentials",
+  saveGitHubToken: "dugout:saveGitHubToken",
+  clearGitHubToken: "dugout:clearGitHubToken",
   event: "dugout:event",
 } as const;
 
@@ -65,6 +87,13 @@ export interface DugoutApi {
   resume(storyKey: string): Promise<Story>;
   restart(storyKey: string): Promise<Story>;
   createPullRequests(storyKey: string): Promise<PullRequest[]>;
+  /* Settings (#17). Mutations return the fresh view so the renderer needn't re-fetch. */
+  getSettings(): Promise<SettingsView>;
+  saveWorkspaceRoots(roots: string[]): Promise<SettingsView>;
+  saveJiraCredentials(creds: JiraCredentialsInput): Promise<SettingsView>;
+  clearJiraCredentials(): Promise<SettingsView>;
+  saveGitHubToken(token: string): Promise<SettingsView>;
+  clearGitHubToken(): Promise<SettingsView>;
   /** Subscribe to streamed telemetry; returns an unsubscribe function. */
   onEvent(listener: (event: DugoutEvent) => void): () => void;
 }

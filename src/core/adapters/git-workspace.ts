@@ -7,8 +7,11 @@ import type { WorkspacePort, DiscoveredClone } from "../ports/workspace.js";
 const run = promisify(execFile);
 
 export interface GitWorkspaceConfig {
-  /** Developer-chosen directories to scan (one level deep) for git clones. */
-  roots: string[];
+  /**
+   * Developer-chosen directories to scan (one level deep) for git clones. A thunk makes the roots
+   * LIVE (#17): the settings UI edits them and the next rescan sees the new set, no restart.
+   */
+  roots: string[] | (() => string[]);
 }
 
 /**
@@ -20,7 +23,7 @@ export class GitWorkspace implements WorkspacePort {
   constructor(private readonly config: GitWorkspaceConfig) {}
 
   async listRoots(): Promise<string[]> {
-    return this.config.roots;
+    return typeof this.config.roots === "function" ? this.config.roots() : this.config.roots;
   }
 
   /**

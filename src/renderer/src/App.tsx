@@ -6,6 +6,7 @@ import type { ClarifyingQuestion, ClarificationRound } from "../../core/ports/ex
 import type { DeclaredRepo } from "../../core/repo-scope.js";
 import type { DraftStoryResult } from "../../core/orchestrator.js";
 import { useDugout } from "./dugout-context.js";
+import { SettingsPanel } from "./settings.js";
 import {
   StatusRibbon,
   StoryPanel,
@@ -50,7 +51,8 @@ type View =
       rounds: ClarificationRound[];
       kind: "draft" | "redraft";
     }
-  | { type: "story"; story: Story };
+  | { type: "story"; story: Story }
+  | { type: "settings" };
 
 export function App() {
   const dugout = useDugout();
@@ -248,7 +250,7 @@ export function App() {
   const panelTicket =
     view.type === "story"
       ? tickets.find((t) => t.key === view.story.key) ?? null
-      : view.type === "roster"
+      : view.type === "roster" || view.type === "settings"
         ? null
         : view.ticket;
   const panelRepos =
@@ -267,6 +269,13 @@ export function App() {
           <span className="wordmark">DUGOUT</span>
           <span className="tagline">the head coach's command post</span>
         </div>
+        <button
+          type="button"
+          className="settings-gear"
+          onClick={() => setView({ type: "settings" })}
+        >
+          Settings
+        </button>
       </header>
 
       <StatusRibbon story={view.type === "story" ? view.story : null} />
@@ -274,7 +283,11 @@ export function App() {
       {error && <div className="error-bar">⚠ {error}</div>}
       <PrBanner prs={prs} />
 
-      {view.type === "roster" ? (
+      {view.type === "settings" ? (
+        <main className="stage">
+          <SettingsPanel onBack={backToRoster} />
+        </main>
+      ) : view.type === "roster" ? (
         <main className="stage stage-roster">
           <TicketRoster tickets={tickets} onSelect={onSelect} />
         </main>
