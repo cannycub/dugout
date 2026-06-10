@@ -1218,6 +1218,9 @@ body {
   color: var(--clay);
 }
 .settings-gear {
+  /* The topbar is the window-drag strip (hiddenInset titlebar); without this opt-out a real
+     mouse click is consumed by the drag hit-test and the button never fires. */
+  -webkit-app-region: no-drag;
   margin-left: auto;
   background: none;
   border: 1px solid rgba(238, 244, 236, 0.14);
